@@ -719,6 +719,22 @@ with a test, not a cosmetic one — see
   warehouse but hidden by the grid, and no success feedback on any action.
 - **Still no superadmin row in the local database**, so `/admin/*` remains
   unreachable by hand (carried from Phase 3).
+- **`npx fallow dead-code` has ten standing findings, none of them blocking**
+  (the tool is `reference/discipline.md` §12A.4, and Phase 5's checklist gates on
+  `npx fallow audit`, which only looks at files changed since the last commit —
+  so these surface only if their file is touched again).
+  - Phase 4's one real hit, `formatDate`, is deleted.
+  - `apiFetch`, `listModuleCatalogue`, and `firebase.app` are unused exports from
+    Phases 2–3. `listModuleCatalogue` is the interesting one: `/admin/modules`
+    exists and is tested, and no screen calls it — the create-tenant form has the
+    three module codes inline. Worth resolving one way or the other.
+  - The flagged type exports — `ListResponse`, `StockCell`, `LowStockRow`,
+    `ModuleCatalogueEntry`, `AsyncState`, `AuthState` — appear only inside
+    exported function signatures. Removing the export would make those
+    signatures unusable by a caller, so this is a false-positive class and
+    should be suppressed rather than "fixed" if it ever becomes noisy.
+  - `tailwindcss` is reported as a dev dependency used in production. It is a
+    build-time tool and belongs where it is; Phase 0 put it there deliberately.
 - **Still no frontend tests at all.** §12.5 defines them; Phase 4's brief does
   not ask for them, and the count is now six more untested screens than it was.
 - **The inventory screens work but read as unintuitive** — reported from the
