@@ -7,7 +7,13 @@ import { ApiError } from "../lib/api";
  * nothing lurches when the data arrives. The row height has to match the real
  * one or the point is lost.
  */
-export function SkeletonRows({ rows = 5, cols }: { rows?: number; cols: number }) {
+export function SkeletonRows({
+  rows = 5,
+  cols,
+}: {
+  rows?: number;
+  cols: number;
+}) {
   return (
     <tbody>
       {Array.from({ length: rows }, (_, row) => (
@@ -23,6 +29,57 @@ export function SkeletonRows({ rows = 5, cols }: { rows?: number; cols: number }
         </tr>
       ))}
     </tbody>
+  );
+}
+
+/**
+ * One column heading. `align: "right"` is the only alignment variant, because the
+ * only columns that are not left-aligned are numbers, and every number in this
+ * application is right-aligned.
+ */
+export type Column = {
+  label: string;
+  align?: "right";
+  /** An actions column has no visible heading, but a table still needs one —
+   *  a screen reader announcing "column 6" is not a heading. */
+  hidden?: boolean;
+};
+
+/**
+ * The heading row every data table in this application shares.
+ *
+ * Extracted in Phase 5B, at the point §12A.4 sets: the goods receipt screens made
+ * this the *fourth* copy of the same nineteen lines, and Phase 4 had already
+ * noted that catching a duplicated component after two copies is a ten-minute fix
+ * and after five it is an afternoon.
+ *
+ * Only the heading row is shared, deliberately. The cells stay with their screen,
+ * because a column's *content* is where the interesting decisions live — a link
+ * target, a deleted-product marker, a signed delta — and a config object rich
+ * enough to express those would grow a case per column type and be worse than the
+ * duplication it replaced.
+ */
+export function TableHead({ columns }: { columns: Column[] }) {
+  return (
+    <thead className="text-xs uppercase tracking-wide text-secondary">
+      <tr>
+        {columns.map((column, index) => (
+          <th
+            key={index}
+            scope="col"
+            className={`px-3 py-2.5 font-medium${
+              column.align === "right" ? " text-right" : ""
+            }`}
+          >
+            {column.hidden ? (
+              <span className="sr-only">{column.label}</span>
+            ) : (
+              column.label
+            )}
+          </th>
+        ))}
+      </tr>
+    </thead>
   );
 }
 

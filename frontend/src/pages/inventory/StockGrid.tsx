@@ -7,6 +7,7 @@ import {
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableHead,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { listLowStock, listStock, listWarehouses } from "../../lib/api";
@@ -90,19 +91,13 @@ export function StockGrid() {
         <>
           <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
             <table className="w-full min-w-[34rem] text-left text-sm">
-              <thead className="text-xs uppercase tracking-wide text-secondary">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Product
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Warehouse
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                    On hand
-                  </th>
-                </tr>
-              </thead>
+              <TableHead
+                columns={[
+                  { label: "Product" },
+                  { label: "Warehouse" },
+                  { label: "On hand", align: "right" },
+                ]}
+              />
 
               {state.status === "loading" && <SkeletonRows cols={COLUMNS} />}
 

@@ -116,7 +116,10 @@ export type ListQuery = {
   sort?: string;
 };
 
-function queryString(query: ListQuery, extra: Record<string, string | undefined> = {}): string {
+function queryString(
+  query: ListQuery,
+  extra: Record<string, string | undefined> = {},
+): string {
   const params = new URLSearchParams();
   if (query.page && query.page > 1) params.set("page", String(query.page));
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
@@ -190,10 +193,10 @@ export function getTenant(id: string) {
 }
 
 export function createTenant(body: CreateTenantRequest) {
-  return apiFetch<{ tenant: TenantDetail; admin: { id: string; email: string } }>(
-    "/api/admin/tenants",
-    { method: "POST", body: JSON.stringify(body) },
-  );
+  return apiFetch<{
+    tenant: TenantDetail;
+    admin: { id: string; email: string };
+  }>("/api/admin/tenants", { method: "POST", body: JSON.stringify(body) });
 }
 
 export function patchTenant(
@@ -206,7 +209,11 @@ export function patchTenant(
   });
 }
 
-export function setTenantModule(id: string, code: ModuleCode, enabled: boolean) {
+export function setTenantModule(
+  id: string,
+  code: ModuleCode,
+  enabled: boolean,
+) {
   return apiFetch<TenantModule[]>(`/api/admin/tenants/${id}/modules/${code}`, {
     method: "PUT",
     body: JSON.stringify({ enabled }),
@@ -271,7 +278,11 @@ export function createTenantUser(body: CreateUserRequest) {
 
 export function patchTenantUser(
   id: string,
-  body: { fullName?: string; isActive?: boolean; tenantRole?: "staff" | "admin" },
+  body: {
+    fullName?: string;
+    isActive?: boolean;
+    tenantRole?: "staff" | "admin";
+  },
 ) {
   return apiFetch<TenantUserDetail>(`/api/tenant/users/${id}`, {
     method: "PATCH",
@@ -381,6 +392,11 @@ export type LedgerEntry = {
   unitCost: number;
   sourceType: SourceType;
   sourceId: string | null;
+  /** Resolved from the source document, so a row can name where it came from
+   *  instead of showing a UUID. Null for a manual adjustment, which has no
+   *  document behind it — the person is the source (§6.3). */
+  sourceNumber: string | null;
+  sourcePoId: string | null;
   note: string | null;
   productId: string;
   sku: string;
@@ -514,6 +530,10 @@ export type LedgerQuery = ListQuery & {
   warehouseId?: string;
   entryType?: EntryType | "";
   sourceType?: SourceType | "";
+  /** The rows one document wrote. This is what the goods receipt confirmation
+   *  panel links to — "2 stock ledger entries created" has to be followed by the
+   *  two entries themselves. */
+  sourceId?: string;
 };
 
 export function listLedger(query: LedgerQuery = {}) {
@@ -523,6 +543,7 @@ export function listLedger(query: LedgerQuery = {}) {
       warehouseId: query.warehouseId,
       entryType: query.entryType || undefined,
       sourceType: query.sourceType || undefined,
+      sourceId: query.sourceId,
     })}`,
   );
 }
@@ -616,11 +637,7 @@ export function restoreSupplier(id: string) {
 }
 
 export type RequisitionStatus =
-  | "draft"
-  | "submitted"
-  | "approved"
-  | "rejected"
-  | "cancelled";
+  "draft" | "submitted" | "approved" | "rejected" | "cancelled";
 
 export type RequisitionLine = {
   id: string;
@@ -752,10 +769,7 @@ export function cancelRequisition(id: string, reason: string) {
 }
 
 export type PurchaseOrderStatus =
-  | "open"
-  | "partially_received"
-  | "received"
-  | "cancelled";
+  "open" | "partially_received" | "received" | "cancelled";
 
 export type PurchaseOrderLine = {
   id: string;
@@ -804,9 +818,11 @@ export type PurchaseOrder = {
   qtyOutstanding: number;
 };
 
-// The return type of getPurchaseOrder.
-// fallow-ignore-next-line unused-type
-export type PurchaseOrderDetail = PurchaseOrder & { lines: PurchaseOrderLine[] };
+// The return type of getPurchaseOrder. No suppression needed since Phase 5B: the
+// order detail screen names it directly, now that its sections are components.
+export type PurchaseOrderDetail = PurchaseOrder & {
+  lines: PurchaseOrderLine[];
+};
 
 export type PurchaseOrderQuery = ListQuery & {
   status?: PurchaseOrderStatus | "";
@@ -832,5 +848,117 @@ export function cancelPurchaseOrder(id: string, reason: string) {
   return apiFetch<PurchaseOrderDetail>(
     `/api/procurement/purchase-orders/${id}/cancel`,
     { method: "POST", body: JSON.stringify({ reason }) },
+  );
+}
+
+// --------------------------------------------------------------------------
+// Goods receipts — the cross-module transaction (§8.4).
+// --------------------------------------------------------------------------
+
+export type GoodsReceiptLine = {
+  id: string;
+  poLineId: string;
+  lineNo: number;
+  productId: string;
+  sku: string;
+  productName: string;
+  uom: string;
+  productDeleted: boolean;
+  qtyReceived: number;
+  unitCost: number;
+  lineTotal: number;
+};
+
+export type GoodsReceipt = {
+  id: string;
+  grNumber: string;
+  poId: string;
+  poNumber: string;
+  /** Where the order was left by this receipt. */
+  poStatus: PurchaseOrderStatus;
+  supplierId: string;
+  supplierName: string;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  receivedById: string;
+  receivedByName: string;
+  receivedAt: string;
+  note: string | null;
+  lineCount: number;
+  qtyReceived: number;
+  /** SUM(qty × unit cost) — the amount the journal entry was posted for, summed
+   *  server-side in the same expression finance used. */
+  totalValue: number;
+};
+
+// Part of ReceiptResult below, and what a receipt detail screen would read.
+// fallow-ignore-next-line unused-type
+export type GoodsReceiptDetail = GoodsReceipt & { lines: GoodsReceiptLine[] };
+
+/** What the receipt wrote, across all three modules. This is the shape the
+ *  confirmation panel of §10.3 renders — the screenshot the project exists for. */
+export type ReceiptResult = {
+  receipt: GoodsReceiptDetail;
+  purchaseOrder: { id: string; poNumber: string; status: PurchaseOrderStatus };
+  inventory: { ledgerEntryIds: string[]; entryCount: number };
+  finance: {
+    journalEntryId: string;
+    entryNumber: string;
+    amount: number;
+    debitAccountId: string;
+    debitAccountCode: string;
+    debitAccountName: string;
+    creditAccountId: string;
+    creditAccountCode: string;
+    creditAccountName: string;
+  };
+  /** True when this response was rebuilt for a repeated Idempotency-Key: the
+   *  receipt had already been posted and nothing was written twice (§8.6.1). */
+  replayed: boolean;
+};
+
+export type ReceiptLineWrite = {
+  poLineId: string;
+  /** A decimal string, so the browser cannot round a quantity before the server
+   *  sees it (I8). */
+  qtyReceived: string;
+};
+
+export function listGoodsReceipts(query: ListQuery & { poId?: string } = {}) {
+  return apiFetch<ListResponse<GoodsReceipt>>(
+    `/api/procurement/goods-receipts${queryString(query, { poId: query.poId })}`,
+  );
+}
+
+/* There is deliberately no `getGoodsReceipt` wrapper. `GET /goods-receipts/:id`
+   exists and is tested — §9.4 specifies it — but no screen reads a receipt on its
+   own: the confirmation panel shows the one just posted, and the order screen shows
+   the history. A client function nothing calls is the kind of symmetry §9.6.1 warns
+   about, and adding it back is one line whenever a receipt detail screen exists. */
+
+/**
+ * Post a goods receipt (§8.4). One request, one transaction, three modules.
+ *
+ * `idempotencyKey` MUST be generated when the form opens and stay the same across
+ * every retry of that form (§8.6.1) — see `useIdempotencyKey`. A receipt is posted
+ * from a loading dock on warehouse wifi, where a request that times out
+ * client-side but succeeded server-side is an ordinary Tuesday: without a stable
+ * key, tapping "Post receipt" again credits the stock twice with two journal
+ * entries to match, and nothing in the schema would flag it.
+ */
+export function postGoodsReceipt(
+  poId: string,
+  idempotencyKey: string,
+  lines: ReceiptLineWrite[],
+  note?: string,
+) {
+  return apiFetch<ReceiptResult>(
+    `/api/procurement/purchase-orders/${poId}/receipts`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ lines, note }),
+    },
   );
 }

@@ -27,9 +27,11 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
-**Phase:** 5 — **Session A done** (requisitions, POs, suppliers, numbering)
-**Next action:** open [`phases/phase-5-procurement.md`](phases/phase-5-procurement.md)
-and build **Session B — the goods receipt** in a **new session**
+**Phase:** 5 — **DONE** (Session A: requisitions, POs, suppliers, numbering ·
+Session B: the goods receipt, the cross-module transaction)
+**Next action:** the browser walkthrough listed at the end of the Session B log,
+then open [`phases/phase-6-finance.md`](phases/phase-6-finance.md) in a **new
+session**
 
 Migration files that now exist (`backend/migrations/`), applied in this order by
 `cmd/migrate`:
@@ -44,7 +46,7 @@ Migration files that now exist (`backend/migrations/`), applied in this order by
 | `005_rls_grants.up.sql` | RLS enable/force/policy, grants, ledger and superadmin revokes, `seed_tenant_accounts()` |
 | `006_pr_cancel_from_draft.up.sql` | relaxes `pr_submitted_has_timestamp` so a draft can be cancelled without a submission that never happened — see *Decisions* |
 
-Backend packages as of Phase 5A:
+Backend packages as of Phase 5B:
 
 | Package | Contents |
 |---|---|
@@ -54,19 +56,36 @@ Backend packages as of Phase 5A:
 | `internal/httpx` | the §9.8 error envelope (`Fail`, `FailWith`, `Unauthenticated`), the §9.0 list contract (`ParseList`, `ListResponse`), and **`Numeric`** — the exact-decimal type every NUMERIC crosses the wire as |
 | **`internal/docnum`** | **`Allocate(tx, tenant, docType)`** — §8.1 numbering, in the caller's transaction. `AllocateAt` is the same thing with an explicit instant, which is how E5 can fail. Constants `PR` `PO` `GR` `JE` |
 | `internal/db` | pools, `WithTenant`, migrations, and `SQLState` / `IsUniqueViolation` / `ConstraintName` for mapping constraints to business outcomes |
-| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, the sixteen `/inventory/*` handlers, and the **seventeen `/procurement/*` handlers** |
+| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, the sixteen `/inventory/*` handlers, and the **twenty `/procurement/*` handlers**. **`procurement_receipts.go` is §8.4** — the one handler that writes to three modules in one transaction — with its inventory and finance halves in **`inventory_receipt.go`** and **`finance_journal.go`**, both taking the same `tx` |
 | `testsupport` | `FakeVerifier`, `FakeUsers`, the shared HTTP `Harness` (used by both test packages), the fixtures, and `WithTenantOn` / `NoSuchTenant` |
 
-Frontend routes as of Phase 5A: `/login` `/auth/action` `/` `/admin/tenants`
+Frontend routes as of Phase 5B: `/login` `/auth/action` `/` `/admin/tenants`
 `/admin/tenants/new` `/admin/tenants/:id` `/settings/users` `/settings/users/new`
 `/settings/users/:id` `/inventory/products` `/inventory/products/new`
 `/inventory/products/:id` `/inventory/warehouses` `/inventory/stock`
 `/inventory/ledger` `/procurement/requisitions` `/procurement/requisitions/new`
 `/procurement/requisitions/:id` `/procurement/orders` `/procurement/orders/:id`
-`/procurement/suppliers`. All signed-in screens render inside `AppShell`.
+**`/procurement/orders/:id/receive`** `/procurement/suppliers`. All signed-in
+screens render inside `AppShell`.
 
-**Session B adds one route to each side**: `POST /api/procurement/purchase-orders/:id/receipts`
-and `/procurement/orders/:id/receive`. Everything else it needs is listed below.
+**Phase 6 (finance) starts from a module that already receives postings.**
+`journal_entries` and `journal_entry_lines` have real rows in them the moment
+anybody receives goods, written by `finance_journal.go` — so `/finance` and
+`GET /api/finance/journal-entries` (§10.5) are a read side over data that already
+exists, not a module built from nothing. `postReceiptJournal` and
+`assertJournalBalances` are the worked example of posting one. Phase 6's build
+item 1, the chart of accounts, **already exists**: `seed_tenant_accounts()` has
+run for every tenant since Phase 1.
+
+**Phase 6 also closes the one place Phase 5 does not meet its spec.** §10.3 wants
+both lines of the goods receipt confirmation panel to link; the finance one does
+not, because its target is Phase 6's page. The marker is
+**`frontend/src/pages/procurement/ReceiveGoods.tsx` — `TODO(phase-6)` inside
+`ReceiptConfirmation`** — and closing it is wrapping one `<span>` in a `<Link>` to
+`/finance?sourceId=<receipt id>`, the counterpart of the inventory line's
+`/inventory/ledger?sourceId=<receipt id>`. Doing it before `/finance` exists would
+not 404: `App.tsx` redirects unknown paths to the dashboard, so the link would
+quietly land the reader on the home screen.
 
 ### What a module phase inherits
 
@@ -97,6 +116,10 @@ read it before building procurement rather than deriving the shape again.
 | Lock a document before checking its status | `lockRequisition` in `procurement_requisitions.go` is the worked example: `SELECT … FOR UPDATE`, *then* read `status`. Read-then-check is a race (§8.6.2, H4) |
 | A status chip or filter chips, in the browser | `StatusChip` / `StatusFilter` from `components/StatusChip.tsx`; the words come from `statusLabel` in `lib/format.ts` |
 | A master-data list screen | `MasterDataList` from `components/MasterDataList.tsx` — search, "show deleted", the four §10.7.6 states, pagination — plus `useRowActions` for the per-row toast handling. Suppliers and warehouses both use it |
+| A table heading row, in the browser | `TableHead` with `Column[]` from `components/ListStates.tsx`. Every table in the application uses it; do not write a `<thead>` by hand |
+| Post a journal entry | `postReceiptJournal` in `internal/api/finance_journal.go` is the worked example: `accountByCode` resolves 1300/2150, `docnum.Allocate(tx, …, docnum.JE)` numbers it, and **`assertJournalBalances`** is called before the transaction can commit. Both sums are computed in SQL — never compare two `httpx.Numeric` in Go |
+| Write a cross-module transaction | `createGoodsReceipt` in `procurement_receipts.go`. One `tx`, passed into the other modules' functions. **D8 is the test that proves it**; read its comment before changing step order, because it depends on the ledger being written *before* the journal |
+| Take an idempotency key | `idempotencyKey(c)` plus `receiptByKey` and the `SavePoint`/`RollbackTo` pair in `createGoodsReceipt`. Match the *constraint name*, never bare SQLSTATE `23505` |
 
 **Trap 1 — a helper must never signal failure by returning what `httpx.Fail`
 returned.** `Fail` returns `nil` deliberately: the body is already written, and
@@ -206,6 +229,19 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 | 2026-07-26 | `/admin/tenants/new` reads its module list from **`GET /admin/modules`** instead of a constant in the file | Carried from Phase 4, which flagged `listModuleCatalogue` as an unused export and called it "the interesting one". Deleting the client function would have been the smaller change; wiring it up is the right one, because the hardcoded array was a second copy of the `modules` rows that nothing kept in step — and a fourth module added to the catalogue would have been invisible to the one screen whose job is choosing modules. The names and descriptions it now renders are identical to what was hardcoded, so nothing changed on screen. |
 | 2026-07-26 | `apiFetch` is no longer exported | Every endpoint has a named wrapper with a return type, and nothing outside `lib/api.ts` used it. A screen reaching past the wrappers would be a request whose shape nothing checks — the first step towards one URL spelled two ways. |
 | 2026-07-26 | The §10.7.3 **bottom tab bar** now exists, below `md` | Deferred through Phases 3-4 on the grounds that "a tab bar with one tab is not a navigation aid". Procurement makes that argument expire: Home, Requests, Orders, and Stock is four destinations. It is a *shortcut* and not the whole map — suppliers, warehouses, and settings stay in the drawer, because master data is not what anyone reaches for one-handed in a warehouse aisle, which is the case §10.7.3 gives for the bar existing at all. Tabs respect entitlements exactly like the sidebar, and `tabItems` still returns nothing when fewer than two would show. |
+| 2026-07-26 | **The idempotent replay uses a SAVEPOINT, not §8.6.1's "second transaction"** | §8.6.1 is right that a bare unique violation aborts the transaction and that the replay then needs a fresh one. A `SAVEPOINT` before the `goods_receipts` insert removes the premise: `ROLLBACK TO` releases the failure and leaves the *same* transaction usable, so the lookup runs on the connection that already has tenant context, no second connection is held open while the first still holds locks, and TenantTx's `COMMIT` is a real commit rather than one issued against an aborted transaction — which returns the tag `ROLLBACK` and would silently discard a 200 response's own writes. Under READ COMMITTED the post-rollback read takes a fresh snapshot, so it sees the row the racing transaction committed. The savepoint also wraps the `docnum.Allocate` call, so a detected replay gives its GR number back instead of leaving a gap. |
+| 2026-07-26 | The idempotency key is read **twice** — before the order lock and again after it — and the unique violation is only the last backstop | The ordinary replay is answered by the first `SELECT` and never takes a lock or touches a constraint. The second read exists because a test found the bug the first one cannot catch: a twin retry still in flight at that moment commits while this request waits for the lock, and everything after the lock then judges the receipt against quantities its own twin has already booked — answering `422 over_receipt` to the person whose receipt worked. The two reads are not redundant. The first must precede the *status* check, or a retry of a receipt that completed its order is told the order is `received` (409). The second must follow the *lock*, or it cannot see the twin. Both paths return the same body because both call `receiptResult`, which rebuilds the whole response from the committed rows rather than from anything remembered. |
+| 2026-07-26 | A fresh receipt is **201**, a replay is **200**, and the body carries `replayed: true` | §8.6.1 pins only the replay at 200. 201 for the creation is the ordinary meaning of the verb, both are `response.ok`, and the flag lets the confirmation panel say "had already been posted" rather than "posted" — which is the truthful sentence, and the one that stops a user wondering whether they have now received the goods twice. |
+| 2026-07-26 | `Idempotency-Key` must parse as a **UUID** | §8.6.1 says "missing or malformed → 400" without defining malformed. Requiring the UUID the contract says the client generates is what makes the word mean something: the failure this header exists to prevent is a key that *repeats across forms*, and a key that is a timestamp, a form id, or a PO number does exactly that while looking perfectly well-formed. |
+| 2026-07-26 | Two new 422 codes: `empty_receipt` and `idempotency_key_reused` | Same reasoning as Session A's three. A receipt with no lines is refused where an empty requisition is (`empty_requisition`), for symmetry of code shape rather than of endpoints. `idempotency_key_reused` is a key already spent on a receipt against a *different* order: the friendly reading — hand back that other order's receipt — is the dangerous one, because the phone would then report goods arriving against an order nobody touched. |
+| 2026-07-26 | **The receipt locks the purchase order header as well as its lines**, header first — and the lock's necessity was measured rather than assumed | §8.6.3 asks only for the affected lines, which is enough for over-receipt (H5). It is *not* enough for step 4: two receipts each completing a different line both re-read `po_line_status`, each sees the other line outstanding because the other transaction has not committed, and both write `partially_received` — leaving an order half-received with nothing outstanding on it, which no screen can explain and no later receipt can fix. Header-then-lines is also a fixed lock order, so two receipts on overlapping subsets cannot deadlock. **Neither lock mutation makes any test fail**, and the reason is worth knowing: `docnum.Allocate` upserts the tenant's GR sequence row, and *that* row lock serialises every receipt in a tenant long before either reaches step 4. Give each request its own sequence row and the bug appears 10 times out of 10; restore the header lock alone and all 10 pass. The locks stay explicit because the serialisation this handler needs must not depend on how documents happen to be numbered. Recorded in the comment on `TestConcurrentReceiptsOnDifferentLinesCloseTheOrder`. |
+| 2026-07-26 | The cross-module halves are **`inventory_receipt.go`** and **`finance_journal.go`** in `internal/api`, not new `internal/inventory` and `internal/finance` packages | §8.4's note names `procurement.PostGoodsReceipt(tx, actor, poID, req)` calling "inventory and finance service functions, passing the same `tx`". Three new packages would be the first service layer in a codebase that has none — every handler in Phases 3–5A is a method on `server` running raw SQL on the request's transaction — and §4 says not to abstract before the second concrete use case. What the note is actually protecting is that the three modules' writes are visibly one transaction, and file boundaries carry that: `postReceiptStockLedger` and `postReceiptJournal` each take `tx` as their first argument and are called from labelled `[INVENTORY]` and `[FINANCE]` steps. Phase 6 is where a finance package earns itself, if it does. |
+| 2026-07-26 | A missing `1300`/`2150` account is a **500**, not a business refusal — and that is what D8 injects | The chart of accounts is seeded when the workspace is created (§4.2.1) and nothing in the MVP can remove an account, so its absence means the database has been edited by hand. §9.8 has no code for "this workspace is misconfigured", and inventing one would put a code in the contract that tells a warehouse clerk to go and create a ledger account. The valuable consequence is that **D8 needs no test hook in production code**: soft-deleting `2150` fails step 6 on the real path, after the receipt, its lines, the status change, and two ledger rows are already written — so what rolls back is exactly what would roll back in production. |
+| 2026-07-26 | §9.4's `GET /goods-receipts` and `GET /goods-receipts/:id` were both built, though the Session B brief says "one route to each side" | §9.4 lists three receipt routes at `viewer`, and `TestReceiptRoutesCarryTheLevelsFromTheSpec` walks that table — a route in the spec and not in the router is a gap the test would find in Phase 6 rather than now. The list is also what the order screen's receipt history reads. There is deliberately **no `getGoodsReceipt` client wrapper**: no screen reads a single receipt, and an unused client function is the symmetry §9.6.1 warns about. |
+| 2026-07-26 | The stock ledger gained a **`sourceId` filter** and resolves `sourceNumber` / `sourcePoId` | The confirmation panel says "2 stock ledger entries created" and §10.3 requires that to be a link. Without the filter it is a claim the reader cannot check; without the resolved number, §10.4's "rows linked to source documents" is a UUID. Both are a `LEFT JOIN goods_receipts` guarded on `source_type`, shared by the list and the single-row read so they cannot disagree. The alternative — writing the GR number into `stock_ledger.note` — would have duplicated a value nothing keeps in step. |
+| 2026-07-26 | The confirmation panel's **finance line does not link**; the inventory line does | §10.3 wants both lines to link, and one of them cannot yet: `/finance` is Phase 6's page (§10.5). Linking early would not even 404 — `App.tsx` redirects unknown paths to the dashboard, so the click would quietly land the reader on the home screen, which is worse than text in the one screenshot this panel exists for. Building the target instead would mean doing two of Phase 6's three build items inside Phase 5, which is what the phase split exists to prevent. So the finance line shows the JE number and both account names and amounts, and carries a `TODO(phase-6)` naming the exact one-line change and why it waits. Recorded in *Current state* as well, because that is what the next session reads. |
+| 2026-07-26 | **`TableHead` and `Column` extracted to `components/ListStates.tsx`**, and all eleven tables in the application adopted it | The receipt form and the receipt history made this the *fourth* copy of the same nineteen lines, and Phase 5A recorded the trigger in as many words: "worth another look if Session B adds a third of either". Only the heading row moved. The cells stay with their screen, because a column's content is where the decisions live — a link target, a deleted-product marker, a signed delta — and a config object rich enough for those would grow a case per column type. `MasterDataList` already had a private copy of exactly this loop, so `Column` moved to sit beside the shared version and `MasterDataList` now renders `<TableHead columns={columns} />` like everything else. Clone groups fell from 15 to 10. **`Column` has exactly one import path**: an `export type { Column }` re-export from `MasterDataList` shipped briefly and was removed — one type reachable by two paths is the same failure as one URL spelled two ways, and it is how a later screen ends up importing the "other" `Column` and nobody noticing they have drifted. `WarehouseList` and `SupplierList` import it from `ListStates` alongside the component that consumes it. |
+| 2026-07-26 | `OrderDetailPage` was split into `OrderSummary`, `OrderLines`, `OrderProgress`, `CancelOrderPanel`, and `ReceiptHistory` | The receipt history and the two Receive-goods entry points took it to 299 lines and 20 cyclomatic — CRITICAL, and worse than `RequisitionDetailPage` was before Session A split it the same way. Now 104 lines and 13. `CancelOrderPanel` owns its own three state variables, because whether a reason box is open is nothing the rest of the screen needs to know. Still labelled CRITICAL, like its requisition twin, and further splitting would fragment a page component for a metric's sake. |
 | 2026-07-26 | The local superadmin was provisioned by a throwaway, deleted after use, rather than by `cmd/seed` | Carried from Phase 3 — `/admin/*` had been unreachable by hand for three phases. Phase 7 owns the seed script and §3.5.3 already specifies the deterministic-UID shape it should take, so building it now would be doing that work twice and probably differently. The throwaway followed §3.3's order (provider account first, row second, compensating delete on failure); the account and the SQL are recorded below so the next person does not need the program. |
 
 ---
@@ -1017,3 +1053,163 @@ that has no reading mode.
 **Next:** the walkthrough above, then **Session B** of
 [`phases/phase-5-procurement.md`](phases/phase-5-procurement.md) — read §8.4 and
 §8.6 twice — in a new session.
+
+## Phase 5, Session B — 2026-07-26
+
+**Done: the thing the project exists to demonstrate.** `POST
+/api/procurement/purchase-orders/:id/receipts` receives goods, and one request is
+one transaction across three modules: the goods receipt and its lines
+(procurement), the purchase order's new status, one `stock_ledger` row per line
+(inventory), and one balanced journal entry — Dr 1300 Inventory / Cr 2150 GRNI —
+posted for `SUM(qty × unit_cost)` (finance). If any step fails, none of it
+happened, and **D8 proves that rather than asserting it**.
+
+The receipt is idempotent (§8.6.1): the client generates a UUID when the form
+opens and the same key on any retry returns the original receipt with nothing
+written twice. It locks the order and then its lines before validating, so two
+receipts posted at the same second cannot jointly over-receive (H5) and cannot
+leave a completed order looking half-received. Received quantity is still derived
+everywhere — the status of an order is decided by re-reading `po_line_status`,
+not by a counter (I6).
+
+Screens: `/procurement/orders/:id/receive` — per-line quantities defaulting to
+outstanding, and **the confirmation panel of §10.3**, which names what happened in
+all three modules and links to the ledger rows it wrote. `/procurement/orders/:id`
+gained the receipt history and the way in to receiving. `/inventory/ledger` now
+resolves a receipt's document number and links it to its order.
+
+**Tests green:** **D1–D9** and **H1–H6**, plus Groups A, B, C, E, F, G, I–J
+unchanged. **170 top-level tests** (242 including subtests), up from 145 at
+Session A. `go test ./... -p 1` clean, `go vet` clean, `gofmt` clean, `tsc
+--noEmit`, `npm run build`, and `oxlint` all clean — oxlint reports only the four
+pre-existing fast-refresh warnings and none in new code.
+
+H7 is the last outstanding Group H test; it cross-checks B10 (two goroutines
+demoting the last two admins) and belongs to the tenant plane rather than to this
+handler.
+
+**One test found a real bug, and it is the one worth reading.**
+`TestConcurrentRetriesOfOneReceiptPostItOnce` — two retries of *one* form, in
+flight at the same moment — failed with `422 over_receipt`. The handler read the
+idempotency key once, at the top. The loser passed that read (its twin had not
+committed yet), then blocked on the order lock, woke up holding it, and judged its
+own twin's already-booked 25 against the 40 ordered. So the ordinary flaky-wifi
+retry — the exact case §8.6.1 exists for — told the user that too much had arrived
+and asked them to correct a receipt that had posted correctly a millisecond
+earlier. **The fix is a second `receiptByKey` read, taken after the lock and before
+any quantity is judged.** Both reads are needed and for different reasons: the first
+has to precede the status check, or a retry of a receipt that *completed* its order
+gets a 409; the second has to follow the lock, or it cannot see a twin. The savepoint
+is now only the last narrow window rather than the mechanism.
+
+Beyond the listed IDs:
+
+- **`TestConcurrentReceiptsOnDifferentLinesCloseTheOrder`** — two receipts each
+  completing a different line must leave the order `received`, not
+  `partially_received`. This is the case the header lock exists for, and its
+  comment records the measurement described in *Decisions*.
+- **`TestTheIdempotencyConstraintIsNamedWhatTheHandlerMatchesOn`** asserts the
+  literal `goods_receipts_tenant_id_idempotency_key_key`. The replay path branches
+  on that string precisely so a duplicate `gr_number` — also a `23505`, and a real
+  numbering bug — cannot be answered with a cheerful 200. A rename in a migration
+  would otherwise turn every replay into a 500 that only shows up on warehouse
+  wifi.
+- **Isolation from two tenants** through the receipt list, by id, and on the write
+  itself, with tenant B's own data re-read afterwards.
+- Receiving against a `received` or `cancelled` order is `409 state_conflict`
+  carrying where it went; a line belonging to another order is the same 404 an
+  unknown line gets; a key already spent on another order is
+  `422 idempotency_key_reused`.
+- **`TestAReceiptsLedgerRowsAreFindableByItsSourceId`** — the link the confirmation
+  panel offers actually returns the two rows, with the GR number resolved.
+
+**Five mutations were run. Three were caught, two survived, and the survivors
+were the interesting ones:**
+
+| Mutation | Result |
+|---|---|
+| over-receipt compared with `>=` instead of `>` | **caught** — D1 and D3 got 422 where they wanted 201: receiving exactly what was ordered was refused |
+| ledger `unit_cost` taken from the product's `standard_cost` instead of the order line's | **caught** — D5 reported `4.0000 @ 25.00, want 10.0000 @ 1500.00` |
+| `FOR UPDATE` removed from the **PO line** lock | **survived** |
+| `FOR UPDATE` removed from the **PO header** lock | **survived** |
+| both locks removed **and** `docnum` giving each request its own sequence row | **caught, 10 attempts out of 10** — every order left `partially_received` with nothing outstanding |
+
+The two survivors are one finding, and it is recorded in *Decisions*: every receipt
+in a tenant serialises on the `document_sequences` row its GR number comes from,
+which happens before either request reaches the status computation. So the locks
+are currently invisible to a black-box test while remaining entirely load-bearing
+— restoring the header lock alone turns 10 failures into 10 passes. That is an
+accidental invariant of the numbering scheme, not a property of the handler, which
+is exactly why the locks stay written down.
+
+**A test bug worth remembering:** D5's first version ordered by `unit_cost`, which
+PostgreSQL resolves against the **output** column — `unit_cost::text` — so
+`'250.50'` sorted above `'1500.00'`. Production is unaffected because every
+`sortable` map in the codebase uses *qualified* column names, which bind to the
+table rather than to the alias. Qualify the column in a `::text` projection or the
+sort is lexical.
+
+**Live check against the local stack:** a freshly built binary was booted on a
+spare port against the real Docker database — it starts, `/api/health` is 200
+without a token, and both new routes answer. No migration was needed; Session B
+added none, so the schema is still `000`–`006`.
+
+**Deviations from spec:** thirteen, all recorded in *Decisions taken* above. The
+four worth knowing before Phase 6:
+
+- **`finance_journal.go` already posts to `journal_entries`**, so Phase 6 is a read
+  side over data that exists. `assertJournalBalances` is the pattern for any new
+  posting, and both sums are compared in SQL.
+- **A missing `1300`/`2150` account is a 500**, deliberately — and it is what D8
+  injects, so Phase 6 must not "helpfully" turn it into a business refusal without
+  giving D8 another way to fail.
+- **The savepoint, not a second transaction**, is how the idempotent replay works.
+- **`TableHead`** is now how every table in the frontend renders its heading row.
+
+**TODO(post-mvp) markers added:**
+- `backend/internal/api/procurement_receipts.go:388` — `audit gr.posted` (§8.4
+  step 7)
+
+**One `TODO(phase-6)` marker added** — a *different* marker word, so a grep for
+`post-mvp` will not find it and a grep for `TODO(` will:
+- `frontend/src/pages/procurement/ReceiveGoods.tsx` — link the confirmation panel's
+  finance line once `/finance` exists. This is not deferred past the MVP; it is
+  deferred by exactly one phase, and calling it `post-mvp` would have buried it.
+
+**Known broken / left half-done:**
+
+- **No live browser walkthrough of the goods receipt, or of Session A's six
+  screens** (carried). This is now the largest gap in the phase: the confirmation
+  panel is the screenshot the project exists for and nobody has seen it rendered.
+  It needs a second user with `procurement: approver` — the dev account
+  (`dgjy2019@gmail.com`) is a tenant admin and so cannot approve its own
+  requisition — and the walk is: raise → submit → approve as the second user →
+  Receive goods → partial → receive the rest. Phase 4's walkthrough found three
+  real problems in an hour, so this is worth doing before Phase 6.
+- **The API on `:8080` is still the Session A binary.** The spare-port instance
+  used for the live check was stopped again; `make dev` picks up the receipt
+  routes.
+- **`npx fallow audit` is closer to clean but not clean.** Dead code is down to the
+  one standing `tailwindcss` false positive (Phase 0 put it there deliberately;
+  Phase 4 ruled it correct), and there are no stale suppressions. `TableHead` took
+  clone groups 15 → 10; what remains is the pagination-and-empty-state block shared
+  by six list screens, which is genuinely the same twenty lines and would want a
+  `DataTable` wrapper rather than another header-sized extraction — a Phase 7 or
+  frontend-focused job. The reported count then went **10 → 13**, which is not a
+  regression: removing the `Column` re-export meant touching `WarehouseList` and
+  `SupplierList`, and `fallow audit` only looks at changed files — so it pulled the
+  three pre-existing clone groups *between those two screens* into scope. Phase 5A
+  already recorded that pair (the Edit/Save/Cancel cluster) as known residue.
+  `OrderDetailPage` is still flagged CRITICAL at 104 lines after the split, as
+  `RequisitionDetailPage` is at 138; `OrderList` at 168 is worse than either and
+  was not touched this session.
+- **Still no frontend tests at all.** §12.5 defines them; no phase brief has asked
+  for them, and the count is one more untested screen.
+- `go test -race` still cannot run here — no C toolchain on `PATH`. CI runs it, and
+  H5 and the different-lines test are now the third and fourth tests that would
+  benefit.
+- The five inventory-screen readability candidates from Phase 4 are **still open**,
+  deliberately.
+
+**Next:** the walkthrough above, then
+[`phases/phase-6-finance.md`](phases/phase-6-finance.md) in a new session.

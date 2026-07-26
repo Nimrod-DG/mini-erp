@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
-import { ErrorNotice } from "../../components/ListStates";
+import { ErrorNotice, TableHead } from "../../components/ListStates";
 import { StatusChip } from "../../components/StatusChip";
 import { useToast } from "../../components/Toasts";
 import { useAsync } from "../../hooks/useAsync";
@@ -170,7 +170,8 @@ export function RequisitionDetailPage() {
           {pr.status === "approved" && (
             <p className="rounded-lg border border-hairline bg-surface p-4 text-sm text-secondary">
               An approved requisition cannot be cancelled. Cancel the purchase
-              order instead — the goods, not the paperwork, are what is committed.
+              order instead — the goods, not the paperwork, are what is
+              committed.
             </p>
           )}
         </div>
@@ -233,8 +234,8 @@ function ActionsPanel({
             Submit for approval
           </button>
           <p className="text-xs text-secondary">
-            Once submitted it cannot be edited — an approver has to be looking at
-            the same document you sent.
+            Once submitted it cannot be edited — an approver has to be looking
+            at the same document you sent.
           </p>
         </>
       )}
@@ -251,7 +252,10 @@ function ActionsPanel({
             )
           }
           onReject={(reason) =>
-            run(() => rejectRequisition(pr.id, reason), `${pr.prNumber} rejected.`)
+            run(
+              () => rejectRequisition(pr.id, reason),
+              `${pr.prNumber} rejected.`,
+            )
           }
         />
       )}
@@ -329,25 +333,15 @@ function LinesTable({ pr }: { pr: Detail }) {
         <caption className="px-3 pt-3 text-left text-sm font-medium">
           Lines
         </caption>
-        <thead className="text-xs uppercase tracking-wide text-secondary">
-          <tr>
-            <th scope="col" className="px-3 py-2.5 font-medium">
-              #
-            </th>
-            <th scope="col" className="px-3 py-2.5 font-medium">
-              Product
-            </th>
-            <th scope="col" className="px-3 py-2.5 text-right font-medium">
-              Quantity
-            </th>
-            <th scope="col" className="px-3 py-2.5 text-right font-medium">
-              Unit cost
-            </th>
-            <th scope="col" className="px-3 py-2.5 text-right font-medium">
-              Line total
-            </th>
-          </tr>
-        </thead>
+        <TableHead
+          columns={[
+            { label: "#" },
+            { label: "Product" },
+            { label: "Quantity", align: "right" },
+            { label: "Unit cost", align: "right" },
+            { label: "Line total", align: "right" },
+          ]}
+        />
         <tbody>
           {pr.lines.length === 0 && (
             <tr className="border-t border-hairline">
@@ -503,11 +497,18 @@ function EditDraft({
  * rejected requisition would read as a step still to come.
  */
 function Timeline({ pr, timezone }: { pr: Detail; timezone: string }) {
-  const steps: { label: string; who?: string; when: string; detail?: string }[] = [
-    { label: "Raised", who: pr.requestedByName, when: pr.createdAt },
-  ];
+  const steps: {
+    label: string;
+    who?: string;
+    when: string;
+    detail?: string;
+  }[] = [{ label: "Raised", who: pr.requestedByName, when: pr.createdAt }];
   if (pr.submittedAt) {
-    steps.push({ label: "Submitted", who: pr.requestedByName, when: pr.submittedAt });
+    steps.push({
+      label: "Submitted",
+      who: pr.requestedByName,
+      when: pr.submittedAt,
+    });
   }
   if (pr.decidedAt) {
     steps.push({
@@ -583,8 +584,8 @@ function ApproveAndReject({
             ))}
           </select>
           <span className="mt-1 block text-xs text-secondary">
-            This requisition names none, and a purchase order has to be addressed
-            to somebody.
+            This requisition names none, and a purchase order has to be
+            addressed to somebody.
           </span>
         </label>
       )}

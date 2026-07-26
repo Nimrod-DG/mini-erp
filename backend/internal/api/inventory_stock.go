@@ -77,17 +77,23 @@ type lowStockRow struct {
 }
 
 type ledgerRow struct {
-	ID          uuid.UUID     `json:"id"`
-	OccurredAt  time.Time     `json:"occurredAt"`
-	EntryType   string        `json:"entryType"`
-	QtyDelta    httpx.Numeric `json:"qtyDelta"`
-	UnitCost    httpx.Numeric `json:"unitCost"`
-	SourceType  string        `json:"sourceType"`
-	SourceID    *uuid.UUID    `json:"sourceId"`
-	Note        *string       `json:"note"`
-	ProductID   uuid.UUID     `json:"productId"`
-	SKU         string        `json:"sku"`
-	ProductName string        `json:"productName"`
+	ID         uuid.UUID     `json:"id"`
+	OccurredAt time.Time     `json:"occurredAt"`
+	EntryType  string        `json:"entryType"`
+	QtyDelta   httpx.Numeric `json:"qtyDelta"`
+	UnitCost   httpx.Numeric `json:"unitCost"`
+	SourceType string        `json:"sourceType"`
+	SourceID   *uuid.UUID    `json:"sourceId"`
+	// SourceNumber and SourcePOID resolve a `goods_receipt` row's document, so
+	// §10.4's "rows linked to source documents" is a link rather than a UUID the
+	// reader has to go and look up. Null for a manual adjustment, which has no
+	// document behind it — the person is the source (§6.3).
+	SourceNumber *string    `json:"sourceNumber"`
+	SourcePOID   *uuid.UUID `json:"sourcePoId"`
+	Note         *string    `json:"note"`
+	ProductID    uuid.UUID  `json:"productId"`
+	SKU          string     `json:"sku"`
+	ProductName  string     `json:"productName"`
 	// ProductDeleted lets the screen mark a row whose product has since been
 	// deleted, rather than leaving the reader wondering why it is not in the
 	// product list.
@@ -270,6 +276,13 @@ func (s *server) listLedger(c *fiber.Ctx) error {
 	if sourceType != "" && !contains(sourceTypes, sourceType) {
 		return malformed(c, "sourceType must be one of %s.", strings.Join(sourceTypes, ", "))
 	}
+	// The rows one document wrote. This is what the goods receipt confirmation
+	// panel links to: "2 stock ledger entries created" has to be followed by the
+	// two entries themselves, or it is a claim the reader cannot check.
+	sourceID, ok := optionalUUID(c, "sourceId")
+	if !ok {
+		return malformed(c, "sourceId is not a valid id.")
+	}
 	from, ok := optionalTime(c, "from")
 	if !ok {
 		return malformed(c, "from must be an RFC 3339 timestamp.")
@@ -284,10 +297,12 @@ func (s *server) listLedger(c *fiber.Ctx) error {
 		JOIN products   p ON p.id = l.product_id
 		JOIN warehouses w ON w.id = l.warehouse_id
 		JOIN users      u ON u.id = l.created_by
+		` + ledgerSourceJoin + `
 		WHERE (?::uuid IS NULL OR l.product_id = ?)
 		  AND (?::uuid IS NULL OR l.warehouse_id = ?)
 		  AND (? = '' OR l.entry_type = ?)
 		  AND (? = '' OR l.source_type = ?)
+		  AND (?::uuid IS NULL OR l.source_id = ?)
 		  AND (?::timestamptz IS NULL OR l.occurred_at >= ?)
 		  AND (?::timestamptz IS NULL OR l.occurred_at <= ?)
 		  AND (p.sku ILIKE ? OR p.name ILIKE ? OR COALESCE(l.note, '') ILIKE ?)`
@@ -296,6 +311,7 @@ func (s *server) listLedger(c *fiber.Ctx) error {
 		warehouseID, warehouseID,
 		entryType, entryType,
 		sourceType, sourceType,
+		sourceID, sourceID,
 		from, from,
 		to, to,
 		params.Like(), params.Like(), params.Like(),
@@ -312,7 +328,7 @@ func (s *server) listLedger(c *fiber.Ctx) error {
 		SELECT l.id, l.occurred_at, l.entry_type,
 		       l.qty_delta::text AS qty_delta,
 		       l.unit_cost::text AS unit_cost,
-		       l.source_type, l.source_id, l.note,
+		       l.source_type, l.source_id, l.note,`+ledgerSourceColumns+`
 		       l.product_id, p.sku, p.name AS product_name,
 		       (p.deleted_at IS NOT NULL) AS product_deleted,
 		       l.warehouse_id, w.code AS warehouse_code,
@@ -336,6 +352,21 @@ var (
 	entryTypes  = []string{"receipt", "issue", "adjustment"}
 	sourceTypes = []string{"goods_receipt", "manual_adjustment"}
 )
+
+// ledgerSourceJoin resolves the document a `goods_receipt` row came from. It is
+// shared by the list and the single-row read so the two cannot disagree about
+// what a ledger row says its source is.
+//
+// A LEFT JOIN, because a manual adjustment legitimately has no document — and
+// the `source_type` guard is on the join rather than in the WHERE, so a future
+// source type with a UUID that happens to match a receipt cannot pick it up.
+const ledgerSourceJoin = `
+		LEFT JOIN goods_receipts gr
+		  ON gr.id = l.source_id AND l.source_type = 'goods_receipt'`
+
+// ledgerSourceColumns is the projection half of the same thing.
+const ledgerSourceColumns = `
+		       gr.gr_number AS source_number, gr.po_id AS source_po_id,`
 
 type adjustmentRequest struct {
 	ProductID   string         `json:"productId"`
@@ -478,7 +509,7 @@ func (s *server) ledgerEntry(tx *gorm.DB, id uuid.UUID) (*ledgerRow, error) {
 		SELECT l.id, l.occurred_at, l.entry_type,
 		       l.qty_delta::text AS qty_delta,
 		       l.unit_cost::text AS unit_cost,
-		       l.source_type, l.source_id, l.note,
+		       l.source_type, l.source_id, l.note,`+ledgerSourceColumns+`
 		       l.product_id, p.sku, p.name AS product_name,
 		       (p.deleted_at IS NOT NULL) AS product_deleted,
 		       l.warehouse_id, w.code AS warehouse_code,
@@ -487,6 +518,7 @@ func (s *server) ledgerEntry(tx *gorm.DB, id uuid.UUID) (*ledgerRow, error) {
 		JOIN products   p ON p.id = l.product_id
 		JOIN warehouses w ON w.id = l.warehouse_id
 		JOIN users      u ON u.id = l.created_by
+		`+ledgerSourceJoin+`
 		WHERE l.id = ?`, id).Scan(&rows).Error; err != nil {
 		return nil, err
 	}

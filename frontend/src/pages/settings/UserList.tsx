@@ -7,10 +7,15 @@ import {
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableHead,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
-import { listTenantUsers, type ModuleCode, type TenantUser } from "../../lib/api";
+import {
+  listTenantUsers,
+  type ModuleCode,
+  type TenantUser,
+} from "../../lib/api";
 
 const COLUMNS = 4;
 
@@ -108,22 +113,14 @@ export function UserList() {
         <>
           <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
             <table className="w-full min-w-[38rem] text-left text-sm">
-              <thead className="text-xs uppercase tracking-wide text-secondary">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Name
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Workspace role
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Effective module levels
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Status
-                  </th>
-                </tr>
-              </thead>
+              <TableHead
+                columns={[
+                  { label: "Name" },
+                  { label: "Workspace role" },
+                  { label: "Effective module levels" },
+                  { label: "Status" },
+                ]}
+              />
 
               {state.status === "loading" && <SkeletonRows cols={COLUMNS} />}
 
@@ -151,7 +148,9 @@ export function UserList() {
                         >
                           {user.fullName}
                         </Link>
-                        <div className="text-xs text-secondary">{user.email}</div>
+                        <div className="text-xs text-secondary">
+                          {user.email}
+                        </div>
                         {user.id === me.user.id && (
                           <span className="text-xs text-secondary">(you)</span>
                         )}

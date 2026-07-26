@@ -7,6 +7,7 @@ import {
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableHead,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { listTenants, type TenantSummary } from "../../lib/api";
@@ -21,7 +22,9 @@ function StatusPill({ status }: { status: TenantSummary["status"] }) {
       ? "border-success/40 text-success"
       : "border-warning/40 text-warning";
   return (
-    <span className={`rounded border px-2 py-0.5 text-xs ${tone}`}>{status}</span>
+    <span className={`rounded border px-2 py-0.5 text-xs ${tone}`}>
+      {status}
+    </span>
   );
 }
 
@@ -89,25 +92,15 @@ export function TenantList() {
               across rows (§10.7.4). */}
           <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
             <table className="w-full min-w-[42rem] text-left text-sm">
-              <thead className="text-xs uppercase tracking-wide text-secondary">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Workspace
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Status
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Users
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Modules
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Timezone
-                  </th>
-                </tr>
-              </thead>
+              <TableHead
+                columns={[
+                  { label: "Workspace" },
+                  { label: "Status" },
+                  { label: "Users" },
+                  { label: "Modules" },
+                  { label: "Timezone" },
+                ]}
+              />
 
               {state.status === "loading" && <SkeletonRows cols={COLUMNS} />}
 

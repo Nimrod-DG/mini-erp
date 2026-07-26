@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
 import {
@@ -7,6 +7,7 @@ import {
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableHead,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
@@ -55,12 +56,20 @@ export function LedgerPage() {
   const [entryType, setEntryType] = useState<EntryType | "">("");
   const [sourceType, setSourceType] = useState<SourceType | "">("");
 
+  // `?sourceId=` narrows the ledger to the rows one document wrote. It comes from
+  // the URL rather than from a control, because it is not a filter anybody would
+  // type — it is what "2 stock ledger entries created" links to on the goods
+  // receipt confirmation panel, and it has to keep working when that link is
+  // pasted to a colleague.
+  const [params, setParams] = useSearchParams();
+  const sourceId = params.get("sourceId") ?? "";
+
   const warehouses = useAsync("ledger-warehouses", () =>
     listWarehouses({ pageSize: 100, sort: "code" }),
   );
 
   const { state, reload } = useAsync(
-    `ledger:${page}:${search}:${warehouseId}:${entryType}:${sourceType}`,
+    `ledger:${page}:${search}:${warehouseId}:${entryType}:${sourceType}:${sourceId}`,
     () =>
       listLedger({
         page,
@@ -68,12 +77,17 @@ export function LedgerPage() {
         warehouseId: warehouseId || undefined,
         entryType,
         sourceType,
+        sourceId: sourceId || undefined,
         sort: "-occurredAt",
       }),
   );
 
   const filtered =
-    search !== "" || warehouseId !== "" || entryType !== "" || sourceType !== "";
+    search !== "" ||
+    warehouseId !== "" ||
+    entryType !== "" ||
+    sourceType !== "" ||
+    sourceId !== "";
 
   const select =
     "min-h-11 rounded-md border border-hairline bg-surface px-3 text-sm";
@@ -152,31 +166,50 @@ export function LedgerPage() {
         </label>
       </div>
 
+      {sourceId !== "" && (
+        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3 rounded-lg border border-hairline bg-raised px-4 py-3 text-sm">
+          <span>
+            Showing only the movements from one document
+            {state.status === "ready" && state.data.data[0]?.sourceNumber && (
+              <>
+                {" — "}
+                <span className="tabular">
+                  {state.data.data[0].sourceNumber}
+                </span>
+              </>
+            )}
+            .
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(params);
+              next.delete("sourceId");
+              setParams(next, { replace: true });
+              setPage(1);
+            }}
+            className="text-accent underline decoration-hairline underline-offset-2"
+          >
+            Show all movements
+          </button>
+        </div>
+      )}
+
       {state.status === "error" ? (
         <ErrorNotice error={state.error} onRetry={reload} />
       ) : (
         <>
           <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
             <table className="w-full min-w-[48rem] text-left text-sm">
-              <thead className="text-xs uppercase tracking-wide text-secondary">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    When
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Product
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Warehouse
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                    Change
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Source
-                  </th>
-                </tr>
-              </thead>
+              <TableHead
+                columns={[
+                  { label: "When" },
+                  { label: "Product" },
+                  { label: "Warehouse" },
+                  { label: "Change", align: "right" },
+                  { label: "Source" },
+                ]}
+              />
 
               {state.status === "loading" && <SkeletonRows cols={COLUMNS} />}
 
@@ -227,7 +260,19 @@ export function LedgerPage() {
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        {entry.entryType}
+                        {/* A receipt names the document behind it and links to
+                            the order it arrived against (§10.4). An adjustment
+                            names the person, because that is its source (§6.3). */}
+                        {entry.sourceNumber && entry.sourcePoId ? (
+                          <Link
+                            to={`/procurement/orders/${entry.sourcePoId}`}
+                            className="tabular underline decoration-hairline underline-offset-2"
+                          >
+                            {entry.sourceNumber}
+                          </Link>
+                        ) : (
+                          entry.entryType
+                        )}
                         <div className="text-xs text-secondary">
                           {entry.note ?? entry.createdByName}
                         </div>

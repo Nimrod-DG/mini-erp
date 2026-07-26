@@ -1,6 +1,7 @@
 import { useState } from "react";
 
-import { MasterDataList, type Column } from "../../components/MasterDataList";
+import { type Column } from "../../components/ListStates";
+import { MasterDataList } from "../../components/MasterDataList";
 import { useToast } from "../../components/Toasts";
 import { useMe } from "../../hooks/useAuth";
 import { useRowActions } from "../../hooks/useRowActions";
@@ -157,7 +158,9 @@ function SupplierCells({
           <>
             <span className="tabular">{supplier.leadTimeDays}</span>
             <span className="text-secondary"> days</span>
-            <div className="text-xs text-secondary">{supplier.paymentTerms}</div>
+            <div className="text-xs text-secondary">
+              {supplier.paymentTerms}
+            </div>
           </>
         )}
       </td>

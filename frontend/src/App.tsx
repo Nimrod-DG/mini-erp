@@ -25,6 +25,7 @@ import { StockGrid } from "./pages/inventory/StockGrid";
 import { WarehouseList } from "./pages/inventory/WarehouseList";
 import { OrderDetailPage } from "./pages/procurement/OrderDetail";
 import { OrderList } from "./pages/procurement/OrderList";
+import { ReceiveGoodsPage } from "./pages/procurement/ReceiveGoods";
 import { RequisitionDetailPage } from "./pages/procurement/RequisitionDetail";
 import { RequisitionList } from "./pages/procurement/RequisitionList";
 import { RequisitionNew } from "./pages/procurement/RequisitionNew";
@@ -188,6 +189,19 @@ export default function App() {
                   <Signed>
                     <RequireModule module="procurement">
                       <OrderDetailPage />
+                    </RequireModule>
+                  </Signed>
+                }
+              />
+              {/* §8.4's screen. The guard here is the module, not the level: the
+                approver check is cosmetic on the screen itself and real in the
+                endpoint (I12). */}
+              <Route
+                path="/procurement/orders/:id/receive"
+                element={
+                  <Signed>
+                    <RequireModule module="procurement">
+                      <ReceiveGoodsPage />
                     </RequireModule>
                   </Signed>
                 }

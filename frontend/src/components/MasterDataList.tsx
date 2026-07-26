@@ -1,7 +1,14 @@
 import { useState, type ReactNode } from "react";
 
 import { AppShell } from "./AppShell";
-import { EmptyState, ErrorNotice, Pagination, SkeletonRows } from "./ListStates";
+import {
+  EmptyState,
+  ErrorNotice,
+  Pagination,
+  SkeletonRows,
+  TableHead,
+  type Column,
+} from "./ListStates";
 import { useAsync } from "../hooks/useAsync";
 import type { ListResponse, MasterDataQuery } from "../lib/api";
 
@@ -20,13 +27,6 @@ import type { ListResponse, MasterDataQuery } from "../lib/api";
  * `includeDeleted` is module `admin` only (§9.0). The caller decides that, because
  * the level is per module; this component only knows whether to offer the toggle.
  */
-export type Column = {
-  label: string;
-  align?: "right";
-  /** An actions column has no visible heading, but a table still needs one. */
-  hidden?: boolean;
-};
-
 export function MasterDataList<T extends { id: string }>({
   title,
   cacheKey,
@@ -91,10 +91,11 @@ export function MasterDataList<T extends { id: string }>({
 
   return (
     <AppShell title={title} actions={toggle}>
-      {adding && form?.(() => {
-        setAdding(false);
-        refresh();
-      })}
+      {adding &&
+        form?.(() => {
+          setAdding(false);
+          refresh();
+        })}
 
       <div className="mb-4 flex flex-wrap items-end gap-4">
         <label className="block max-w-sm grow">
@@ -135,25 +136,7 @@ export function MasterDataList<T extends { id: string }>({
         <>
           <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
             <table className={`w-full ${minWidthClass} text-left text-sm`}>
-              <thead className="text-xs uppercase tracking-wide text-secondary">
-                <tr>
-                  {columns.map((column) => (
-                    <th
-                      key={column.label}
-                      scope="col"
-                      className={`px-3 py-2.5 font-medium ${
-                        column.align === "right" ? "text-right" : ""
-                      }`}
-                    >
-                      {column.hidden ? (
-                        <span className="sr-only">{column.label}</span>
-                      ) : (
-                        column.label
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
+              <TableHead columns={columns} />
 
               {state.status === "loading" && (
                 <SkeletonRows cols={columns.length} />

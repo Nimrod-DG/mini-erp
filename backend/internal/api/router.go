@@ -176,7 +176,10 @@ func registerInventory(api fiber.Router, s *server) {
 //   - `PATCH` and `/submit` are `user` and additionally creator-only, for the
 //     same reason.
 //
-// The receipt endpoint — POST /purchase-orders/:id/receipts — is Session B.
+// POST /purchase-orders/:id/receipts is §8.4, the one endpoint that writes to
+// three modules in one transaction. It sits here with the rest of procurement
+// because that is whose event it is; the inventory and finance halves are in
+// inventory_receipt.go and finance_journal.go, and both take the same `tx`.
 func registerProcurement(api fiber.Router, s *server) {
 	proc := api.Group("/procurement")
 
@@ -205,6 +208,13 @@ func registerProcurement(api fiber.Router, s *server) {
 	proc.Get("/purchase-orders", at(viewer), s.listPurchaseOrders)
 	proc.Get("/purchase-orders/:id", at(viewer), s.getPurchaseOrder)
 	proc.Post("/purchase-orders/:id/cancel", at(approver), s.cancelPurchaseOrder)
+
+	// §8.4 — the cross-module transaction. `approver`, because receiving goods
+	// commits the company to owing for them: it writes the stock ledger and posts
+	// a journal entry, neither of which can be edited afterwards.
+	proc.Post("/purchase-orders/:id/receipts", at(approver), s.createGoodsReceipt)
+	proc.Get("/goods-receipts", at(viewer), s.listGoodsReceipts)
+	proc.Get("/goods-receipts/:id", at(viewer), s.getGoodsReceipt)
 
 	// No DELETE on any of the three documents, deliberately. Requisitions and
 	// orders are cancelled, never removed (§6.9.2, I5), and §9.6.1 says in as

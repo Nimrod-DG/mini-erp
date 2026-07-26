@@ -1,6 +1,7 @@
 import { useState } from "react";
 
-import { MasterDataList, type Column } from "../../components/MasterDataList";
+import { type Column } from "../../components/ListStates";
+import { MasterDataList } from "../../components/MasterDataList";
 import { useToast } from "../../components/Toasts";
 import { useMe } from "../../hooks/useAuth";
 import { useRowActions } from "../../hooks/useRowActions";

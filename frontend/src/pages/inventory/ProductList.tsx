@@ -7,6 +7,7 @@ import {
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableHead,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
@@ -94,25 +95,15 @@ export function ProductList() {
         <>
           <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
             <table className="w-full min-w-[42rem] text-left text-sm">
-              <thead className="text-xs uppercase tracking-wide text-secondary">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    SKU
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Name
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                    On hand
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                    Reorder point
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                    Standard cost
-                  </th>
-                </tr>
-              </thead>
+              <TableHead
+                columns={[
+                  { label: "SKU" },
+                  { label: "Name" },
+                  { label: "On hand", align: "right" },
+                  { label: "Reorder point", align: "right" },
+                  { label: "Standard cost", align: "right" },
+                ]}
+              />
 
               {state.status === "loading" && <SkeletonRows cols={COLUMNS} />}
 

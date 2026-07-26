@@ -71,12 +71,16 @@ type lowStock struct {
 }
 
 type ledgerEntry struct {
-	ID             string  `json:"id"`
-	EntryType      string  `json:"entryType"`
-	QtyDelta       float64 `json:"qtyDelta"`
-	UnitCost       float64 `json:"unitCost"`
-	SourceType     string  `json:"sourceType"`
-	SourceID       *string `json:"sourceId"`
+	ID         string  `json:"id"`
+	EntryType  string  `json:"entryType"`
+	QtyDelta   float64 `json:"qtyDelta"`
+	UnitCost   float64 `json:"unitCost"`
+	SourceType string  `json:"sourceType"`
+	SourceID   *string `json:"sourceId"`
+	// Resolved from the source document, so a receipt's ledger row can name where
+	// it came from. Null for a manual adjustment, which has no document.
+	SourceNumber   *string `json:"sourceNumber"`
+	SourcePOID     *string `json:"sourcePoId"`
 	Note           *string `json:"note"`
 	ProductID      string  `json:"productId"`
 	SKU            string  `json:"sku"`

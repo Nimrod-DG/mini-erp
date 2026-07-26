@@ -7,6 +7,7 @@ import {
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableHead,
 } from "../../components/ListStates";
 import { StatusChip, StatusFilter } from "../../components/StatusChip";
 import { useAsync } from "../../hooks/useAsync";
@@ -112,28 +113,16 @@ export function OrderList() {
         <>
           <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
             <table className="w-full min-w-[52rem] text-left text-sm">
-              <thead className="text-xs uppercase tracking-wide text-secondary">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Number
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Status
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Supplier
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-medium">
-                    Expected
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                    Received
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                    Total
-                  </th>
-                </tr>
-              </thead>
+              <TableHead
+                columns={[
+                  { label: "Number" },
+                  { label: "Status" },
+                  { label: "Supplier" },
+                  { label: "Expected" },
+                  { label: "Received", align: "right" },
+                  { label: "Total", align: "right" },
+                ]}
+              />
 
               {state.status === "loading" && <SkeletonRows cols={COLUMNS} />}
 
@@ -186,7 +175,8 @@ export function OrderList() {
                         {row.expectedAt ?? "—"}
                       </td>
                       <td className="px-3 py-3 text-right tabular">
-                        {formatQty(row.qtyReceived)} / {formatQty(row.qtyOrdered)}
+                        {formatQty(row.qtyReceived)} /{" "}
+                        {formatQty(row.qtyOrdered)}
                       </td>
                       <td className="px-3 py-3 text-right tabular">
                         {formatMoney(row.totalAmount)}
