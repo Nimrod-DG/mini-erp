@@ -5,8 +5,6 @@
 
 .PHONY: dev dev-api dev-web up down test migrate seed fmt help
 
-MIGRATE_URL ?= postgres://erp_migrate:localdev@localhost:5432/erp?sslmode=disable
-
 help:
 	@echo "make dev      database + API + frontend together"
 	@echo "make up       database only"
@@ -40,12 +38,13 @@ test:
 	cd backend && go test ./...
 	cd frontend && npm run build
 
-# 000_roles.sql is re-applied after the schema migrations because its grants on
-# the five platform tables cannot be applied on the container's first boot --
-# the tables do not exist yet. The file is idempotent.
+# cmd/migrate applies the versioned migrations and then re-applies
+# 000_roles.sql, whose grants on the five platform tables cannot land on the
+# container's first boot -- the tables do not exist yet. The file is
+# idempotent, and doing it in Go rather than `docker compose exec psql` keeps
+# the target working on Windows, where the shell rewrites the container path.
 migrate:
 	cd backend && go run ./cmd/migrate
-	docker compose exec -T postgres psql "$(MIGRATE_URL)" -f /docker-entrypoint-initdb.d/000_roles.sql
 
 seed:
 	cd backend && go run ./cmd/seed

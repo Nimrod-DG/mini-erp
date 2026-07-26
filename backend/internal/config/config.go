@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -25,9 +26,18 @@ type Config struct {
 	CORSOrigins []string
 }
 
+// PinUTC forces the process's local timezone to UTC (Decision 003 §2.5.2).
+//
+// The deployment sets TZ=UTC, but a developer's laptop does not, and every
+// place an instant becomes a business date — document number periods above
+// all — reads the local zone. Pinning it in code means the laptop and the
+// deployment cannot disagree. Test J2 asserts it.
+func PinUTC() { time.Local = time.UTC }
+
 // Load reads backend/.env when present, then the environment, which wins.
 // A missing .env is not an error: in Cloud Run there is no such file.
 func Load() (*Config, error) {
+	PinUTC()
 	_ = godotenv.Load()
 
 	c := &Config{

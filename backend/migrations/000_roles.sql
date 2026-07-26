@@ -56,5 +56,11 @@ BEGIN
 
   GRANT SELECT                 ON tenants, modules, tenant_modules TO erp_app;
   GRANT SELECT, INSERT, UPDATE ON users, user_module_roles         TO erp_app;
+
+  -- Superadmins touch platform tables, and only platform tables. The matching
+  -- REVOKE on every tenant business table lives in 005_rls_grants.sql, which
+  -- is what makes "no access to tenant data" a property rather than a promise.
+  GRANT SELECT, INSERT, UPDATE
+    ON tenants, modules, tenant_modules, users, user_module_roles TO erp_admin;
 END
 $$;
