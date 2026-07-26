@@ -149,6 +149,53 @@ func (f *TenantFixture) NewUser(t *testing.T, roles map[string]string) *UserFixt
 	return u
 }
 
+// NewSuperadmin creates a platform superadmin: tenant_role 'superadmin' and no
+// tenant, which the users_superadmin_has_no_tenant CHECK requires to go
+// together. It belongs to no TenantFixture, hence the method on TestDB.
+func (d *TestDB) NewSuperadmin(t *testing.T) *UserFixture {
+	t.Helper()
+	n := next()
+
+	u := &UserFixture{
+		ID:          uuid.New(),
+		FirebaseUID: fmt.Sprintf("uid-super-%d", n),
+		Email:       fmt.Sprintf("super-%d@example.test", n),
+		TenantRole:  "superadmin",
+		Roles:       map[string]string{},
+	}
+	mustExec(t, d.Owner, `
+		INSERT INTO users (id, tenant_id, firebase_uid, email, full_name, tenant_role)
+		VALUES (?, NULL, ?, ?, ?, 'superadmin')`,
+		u.ID, u.FirebaseUID, u.Email, fmt.Sprintf("Superadmin %d", n))
+	return u
+}
+
+// Deactivate flips is_active off — the only way a user ever leaves this system
+// (§6.9.4). Their Firebase account still authenticates; identity resolution is
+// what stops them.
+func (d *TestDB) Deactivate(t *testing.T, userID uuid.UUID) {
+	t.Helper()
+	mustExec(t, d.Owner, `UPDATE users SET is_active = false WHERE id = ?`, userID)
+}
+
+// Suspend marks the tenant suspended. Its users then reach identity resolution
+// and are turned away with 403 tenant_suspended, rather than signing in to an
+// application that is inexplicably empty (§9.x).
+func (f *TenantFixture) Suspend(t *testing.T) {
+	t.Helper()
+	mustExec(t, f.db.Owner, `UPDATE tenants SET status = 'suspended' WHERE id = ?`, f.ID)
+}
+
+// DisableModule revokes the tenant's entitlement to a module, without touching
+// anyone's role level. The two are independent, and /api/me must reflect the
+// entitlement, not just the role.
+func (f *TenantFixture) DisableModule(t *testing.T, moduleCode string) {
+	t.Helper()
+	mustExec(t, f.db.Owner, `
+		UPDATE tenant_modules SET enabled = false
+		WHERE tenant_id = ? AND module_code = ?`, f.ID, moduleCode)
+}
+
 // AsTenant runs fn against this tenant on the app pool, with RLS in force.
 func (f *TenantFixture) AsTenant(t *testing.T, fn func(tx *gorm.DB) error) error {
 	t.Helper()

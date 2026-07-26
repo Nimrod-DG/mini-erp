@@ -56,6 +56,9 @@ func Load() (*Config, error) {
 		{"DATABASE_URL", c.DatabaseURL},
 		{"ADMIN_DATABASE_URL", c.AdminDatabaseURL},
 		{"MIGRATE_DATABASE_URL", c.MigrateDatabaseURL},
+		// Required from Phase 2: without it the Admin SDK cannot check a
+		// token's audience, and the API cannot serve one authenticated request.
+		{"FIREBASE_PROJECT_ID", c.FirebaseProjectID},
 	} {
 		if missing.value == "" {
 			return nil, fmt.Errorf("config: %s is required (see backend/.env.example)", missing.key)
