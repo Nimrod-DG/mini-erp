@@ -66,9 +66,15 @@ func ProbePath(module string, level identity.RoleLevel) string {
 	return fmt.Sprintf("/api/probe/%s/%s", module, level)
 }
 
-// WarehousesPath is a tenant-scoped route with NO RequireModule on it, for the
+// TenantTxPath is a tenant-scoped route with NO RequireModule on it, for the
 // tests that are about the transaction rather than about permissions.
-const WarehousesPath = "/api/warehouses"
+//
+// It lives under `/api/probe/` with the rest of the test-only routes. It was
+// `/api/warehouses` until Phase 5, which was fine while no such endpoint existed
+// and misleading the moment `/api/inventory/warehouses` shipped: a reader
+// checking what a failing test covered would find a real endpoint one path
+// segment away and reasonably assume they were the same thing.
+const TenantTxPath = "/api/probe/tenant-tx"
 
 // addProbeRoutes mounts the routes the permission tests exercise.
 //
@@ -82,21 +88,21 @@ const WarehousesPath = "/api/warehouses"
 // cannot show that TenantTx works, because it reads platform tables that carry
 // no RLS and would pass with TenantTx deleted.
 func (h *Harness) addProbeRoutes() {
-	h.App.Get(WarehousesPath, warehouseProbe)
+	h.App.Get(TenantTxPath, tenantTxProbe)
 
 	for _, module := range []string{"procurement", "inventory", "finance"} {
 		for _, level := range []identity.RoleLevel{
 			identity.RoleViewer, identity.RoleUser, identity.RoleApprover, identity.RoleAdmin,
 		} {
 			h.App.Get(ProbePath(module, level),
-				middleware.RequireModule(module, level), warehouseProbe)
+				middleware.RequireModule(module, level), tenantTxProbe)
 		}
 	}
 }
 
-// warehouseProbe reads through the tenant transaction, so reaching it proves
+// tenantTxProbe reads through the tenant transaction, so reaching it proves
 // both that the gate let the caller past and that the transaction is live.
-func warehouseProbe(c *fiber.Ctx) error {
+func tenantTxProbe(c *fiber.Ctx) error {
 	tx := middleware.TxFrom(c)
 	if tx == nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "no tenant transaction")

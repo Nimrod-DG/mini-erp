@@ -203,9 +203,9 @@ func TestB6SuperadminCannotReachTenantEndpoints(t *testing.T) {
 	// data, because TenantTx opens no transaction for a tenantless identity —
 	// the handler finds nil rather than a handle RLS silently empties.
 	t.Run("un-gated tenant-scoped route", func(t *testing.T) {
-		resp := h.Get(t, testsupport.WarehousesPath, super.FirebaseUID)
+		resp := h.Get(t, testsupport.TenantTxPath, super.FirebaseUID)
 		if resp.StatusCode == http.StatusOK {
-			t.Fatalf("a superadmin read tenant data at %s", testsupport.WarehousesPath)
+			t.Fatalf("a superadmin read tenant data at %s", testsupport.TenantTxPath)
 		}
 	})
 

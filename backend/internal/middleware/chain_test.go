@@ -246,7 +246,7 @@ func TestTenantIgnoresClaimsHeadersAndParameters(t *testing.T) {
 	wantCode := warehouseCode(t, mine)
 	denyCode := warehouseCode(t, theirs)
 
-	resp = h.Get(t, testsupport.WarehousesPath+"?tenantId="+theirs.ID.String(), token, headers...)
+	resp = h.Get(t, testsupport.TenantTxPath+"?tenantId="+theirs.ID.String(), token, headers...)
 	testsupport.AssertStatus(t, resp, http.StatusOK)
 	codes := testsupport.Decode[[]string](t, resp)
 
@@ -292,7 +292,7 @@ func TestTenantTxScopesQueriesToTheCallersTenant(t *testing.T) {
 		{"tenant B's user", b.User, wantB, wantA},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := h.Get(t, testsupport.WarehousesPath, tc.user.FirebaseUID)
+			resp := h.Get(t, testsupport.TenantTxPath, tc.user.FirebaseUID)
 			testsupport.AssertStatus(t, resp, http.StatusOK)
 			codes := testsupport.Decode[[]string](t, resp)
 

@@ -161,6 +161,20 @@ func (d *TestDB) NewAppPool(t *testing.T, maxConns int) *gorm.DB {
 	return g
 }
 
+// NoSuchTenant is a tenant ID no fixture ever creates, for the tests that assert
+// what happens when a caller names something that is not there.
+var NoSuchTenant = uuid.MustParse("00000000-0000-4000-8000-000000000000")
+
+// WithTenantOn runs fn against a caller-supplied pool inside a tenant
+// transaction.
+//
+// It takes no *testing.T on purpose: it is called from goroutines, where t.Fatalf
+// is not allowed, so the error comes back to be reported by the goroutine that
+// owns the test (E3, H4).
+func WithTenantOn(g *gorm.DB, tenantID uuid.UUID, fn func(tx *gorm.DB) error) error {
+	return db.WithTenant(context.Background(), g, tenantID, fn)
+}
+
 // AsTenant runs fn on the app pool inside a transaction with app.current_tenant
 // set — the only way tenant data is ever touched (I1).
 func (d *TestDB) AsTenant(t *testing.T, tenantID uuid.UUID, fn func(tx *gorm.DB) error) error {

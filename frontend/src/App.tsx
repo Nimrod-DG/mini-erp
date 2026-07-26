@@ -23,6 +23,12 @@ import { ProductList } from "./pages/inventory/ProductList";
 import { ProductNew } from "./pages/inventory/ProductNew";
 import { StockGrid } from "./pages/inventory/StockGrid";
 import { WarehouseList } from "./pages/inventory/WarehouseList";
+import { OrderDetailPage } from "./pages/procurement/OrderDetail";
+import { OrderList } from "./pages/procurement/OrderList";
+import { RequisitionDetailPage } from "./pages/procurement/RequisitionDetail";
+import { RequisitionList } from "./pages/procurement/RequisitionList";
+import { RequisitionNew } from "./pages/procurement/RequisitionNew";
+import { SupplierList } from "./pages/procurement/SupplierList";
 import { UserDetailPage } from "./pages/settings/UserDetail";
 import { UserList } from "./pages/settings/UserList";
 import { UserNew } from "./pages/settings/UserNew";
@@ -128,6 +134,71 @@ export default function App() {
                     <RequireTenantAdmin>
                       <UserDetailPage />
                     </RequireTenantAdmin>
+                  </Signed>
+                }
+              />
+
+              {/* Procurement (§10.3). Same shape as inventory below: the guard
+                is cosmetic, and every route is independently gated server-side
+                at the levels in §9.4 (I12). */}
+              <Route
+                path="/procurement/requisitions"
+                element={
+                  <Signed>
+                    <RequireModule module="procurement">
+                      <RequisitionList />
+                    </RequireModule>
+                  </Signed>
+                }
+              />
+              {/* Before the :id route, or "new" is read as a requisition ID. */}
+              <Route
+                path="/procurement/requisitions/new"
+                element={
+                  <Signed>
+                    <RequireModule module="procurement">
+                      <RequisitionNew />
+                    </RequireModule>
+                  </Signed>
+                }
+              />
+              <Route
+                path="/procurement/requisitions/:id"
+                element={
+                  <Signed>
+                    <RequireModule module="procurement">
+                      <RequisitionDetailPage />
+                    </RequireModule>
+                  </Signed>
+                }
+              />
+              <Route
+                path="/procurement/orders"
+                element={
+                  <Signed>
+                    <RequireModule module="procurement">
+                      <OrderList />
+                    </RequireModule>
+                  </Signed>
+                }
+              />
+              <Route
+                path="/procurement/orders/:id"
+                element={
+                  <Signed>
+                    <RequireModule module="procurement">
+                      <OrderDetailPage />
+                    </RequireModule>
+                  </Signed>
+                }
+              />
+              <Route
+                path="/procurement/suppliers"
+                element={
+                  <Signed>
+                    <RequireModule module="procurement">
+                      <SupplierList />
+                    </RequireModule>
                   </Signed>
                 }
               />

@@ -9,6 +9,8 @@
  * with the one that counts.
  */
 
+import type { PurchaseOrderStatus, RequisitionStatus } from "./api";
+
 /** Quantities carry four decimals in the database but reading `12.0000` in a
  *  table is worse than reading `12`. Trailing zeros go; significant digits stay. */
 export function formatQty(value: number): string {
@@ -44,4 +46,29 @@ export function formatDateTime(iso: string, timeZone: string): string {
     timeStyle: "short",
     timeZone,
   }).format(new Date(iso));
+}
+
+/** The statuses the two procurement documents move through. One type, because
+ *  every screen that renders a chip renders both kinds. */
+export type DocumentStatus = RequisitionStatus | PurchaseOrderStatus;
+
+const STATUS_LABEL: Record<DocumentStatus, string> = {
+  draft: "Draft",
+  submitted: "Submitted",
+  approved: "Approved",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
+  open: "Open",
+  partially_received: "Partly received",
+  received: "Received",
+};
+
+/**
+ * The word for a status, for people. `partially_received` is the wire value and
+ * has to stay exactly that (§3 naming contract) — this is the only place it is
+ * allowed to read as English, and the mapping lives here rather than inline so two
+ * screens cannot call the same state different things.
+ */
+export function statusLabel(status: DocumentStatus): string {
+  return STATUS_LABEL[status] ?? status;
 }

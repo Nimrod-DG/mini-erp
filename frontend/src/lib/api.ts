@@ -53,15 +53,16 @@ type ErrorEnvelope = { error?: string; message?: string };
  * The single way this app talks to the backend. Every call carries the Firebase
  * ID token.
  *
+ * **Not exported.** Every endpoint in this file has a named wrapper with a return
+ * type, and a screen reaching past them would be a request whose shape nothing
+ * checks — the first step towards a URL spelled two ways.
+ *
  * `getIdToken()` is the whole of token lifecycle management: it returns the
  * cached token and silently refreshes when it is close to expiry. Storing one
  * ourselves would mean reimplementing that badly, and putting it in
  * localStorage would make it stealable by any injected script.
  */
-export async function apiFetch<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const user = auth.currentUser;
   if (!user) {
     throw new ApiError(401, "unauthenticated", "Not signed in.");
@@ -132,6 +133,13 @@ function queryString(query: ListQuery, extra: Record<string, string | undefined>
 // Platform plane — superadmin only (§5.7).
 // --------------------------------------------------------------------------
 
+/* fallow reports the four types below as unused exports. They are not: each is the
+   return type of an exported function just above or below it, so removing the
+   export makes that signature unusable by any caller. Phase 4 identified this as a
+   false-positive class and said to suppress rather than "fix" it — a dead-code
+   report that cries wolf four times is one nobody reads the fifth time. */
+// The return type of listModuleCatalogue.
+// fallow-ignore-next-line unused-type
 export type ModuleCatalogueEntry = {
   code: ModuleCode;
   name: string;
@@ -333,6 +341,8 @@ export type Warehouse = {
   productCount: number;
 };
 
+// The return type of listStock.
+// fallow-ignore-next-line unused-type
 export type StockCell = {
   productId: string;
   sku: string;
@@ -348,6 +358,8 @@ export type StockCell = {
   qtyOnHand: number;
 };
 
+// The return type of listLowStock.
+// fallow-ignore-next-line unused-type
 export type LowStockRow = {
   productId: string;
   sku: string;
@@ -528,5 +540,297 @@ export function postAdjustment(body: AdjustmentRequest) {
   return apiFetch<{ entry: LedgerEntry; qtyOnHand: number }>(
     "/api/inventory/adjustments",
     { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+// --------------------------------------------------------------------------
+// Procurement (§9.4, §10.3).
+//
+// The same rule as inventory applies to every number below: it arrives as the
+// answer PostgreSQL computed, for display. `estimatedTotal`, `totalAmount`,
+// `lineTotal`, and `qtyOutstanding` are all summed server-side where the values
+// are still NUMERIC (I8) — do not re-derive one of them here, because a second
+// implementation of a rule is one that can disagree with the one that counts.
+// --------------------------------------------------------------------------
+
+export type Supplier = {
+  id: string;
+  code: string;
+  name: string;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  leadTimeDays: number;
+  paymentTerms: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  /** Orders that would refuse a delete (G4). Shown in the list so the refusal is
+   *  not the first the user hears of it. */
+  openOrders: number;
+};
+
+export type SupplierWrite = {
+  code?: string;
+  name?: string;
+  /** An empty string clears these two; omitting them leaves them alone. */
+  contactEmail?: string;
+  contactPhone?: string;
+  leadTimeDays?: number;
+  paymentTerms?: string;
+  isActive?: boolean;
+};
+
+export function listSuppliers(query: MasterDataQuery = {}) {
+  return apiFetch<ListResponse<Supplier>>(
+    `/api/procurement/suppliers${queryString(query, {
+      includeDeleted: query.includeDeleted ? "true" : undefined,
+    })}`,
+  );
+}
+
+export function createSupplier(body: SupplierWrite) {
+  return apiFetch<Supplier>("/api/procurement/suppliers", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchSupplier(id: string, body: SupplierWrite) {
+  return apiFetch<Supplier>(`/api/procurement/suppliers/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteSupplier(id: string) {
+  return apiFetch<Supplier>(`/api/procurement/suppliers/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function restoreSupplier(id: string) {
+  return apiFetch<Supplier>(`/api/procurement/suppliers/${id}/restore`, {
+    method: "POST",
+  });
+}
+
+export type RequisitionStatus =
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "rejected"
+  | "cancelled";
+
+export type RequisitionLine = {
+  id: string;
+  lineNo: number;
+  productId: string;
+  sku: string;
+  productName: string;
+  uom: string;
+  /** The product has since been deleted. The line stays — a requisition is a
+   *  historical record (§6.9.1). */
+  productDeleted: boolean;
+  qty: number;
+  estUnitCost: number;
+  lineTotal: number;
+};
+
+export type Requisition = {
+  id: string;
+  prNumber: string;
+  status: RequisitionStatus;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  supplierId: string | null;
+  supplierCode: string | null;
+  supplierName: string | null;
+  notes: string | null;
+
+  requestedById: string;
+  requestedByName: string;
+  submittedAt: string | null;
+  decidedById: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  rejectReason: string | null;
+  cancelledById: string | null;
+  cancelledByName: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+
+  createdAt: string;
+  updatedAt: string;
+  lineCount: number;
+  estimatedTotal: number;
+
+  /** The order approval generated, so the detail screen can link straight to it. */
+  purchaseOrderId: string | null;
+  purchaseOrderNumber: string | null;
+};
+
+export type RequisitionDetail = Requisition & { lines: RequisitionLine[] };
+
+/** One line as the API takes it. Quantities and costs are strings, so the
+ *  browser cannot round a decimal before the server sees it. */
+export type RequisitionLineWrite = {
+  productId: string;
+  qty: string;
+  /** Absent means the product's standard cost, which is what stops a purchase
+   *  order — and the journal entry behind its receipt — being valued at zero. */
+  estUnitCost?: string;
+};
+
+export type RequisitionWrite = {
+  warehouseId?: string;
+  /** An empty string clears it: a requisition may legitimately not name a
+   *  supplier until approval. */
+  supplierId?: string;
+  notes?: string;
+  /** When present, REPLACES the whole set of lines. Drafts only. */
+  lines?: RequisitionLineWrite[];
+};
+
+export type RequisitionQuery = ListQuery & { status?: RequisitionStatus | "" };
+
+export function listRequisitions(query: RequisitionQuery = {}) {
+  return apiFetch<ListResponse<Requisition>>(
+    `/api/procurement/requisitions${queryString(query, {
+      status: query.status || undefined,
+    })}`,
+  );
+}
+
+export function getRequisition(id: string) {
+  return apiFetch<RequisitionDetail>(`/api/procurement/requisitions/${id}`);
+}
+
+export function createRequisition(body: RequisitionWrite) {
+  return apiFetch<RequisitionDetail>("/api/procurement/requisitions", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchRequisition(id: string, body: RequisitionWrite) {
+  return apiFetch<RequisitionDetail>(`/api/procurement/requisitions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function submitRequisition(id: string) {
+  return apiFetch<RequisitionDetail>(
+    `/api/procurement/requisitions/${id}/submit`,
+    { method: "POST" },
+  );
+}
+
+/** `supplierId` is required only when the requisition does not already name one
+ *  (§8.3) — a purchase order has to be addressed to somebody. */
+export function approveRequisition(id: string, supplierId?: string) {
+  return apiFetch<RequisitionDetail>(
+    `/api/procurement/requisitions/${id}/approve`,
+    { method: "POST", body: JSON.stringify(supplierId ? { supplierId } : {}) },
+  );
+}
+
+export function rejectRequisition(id: string, reason: string) {
+  return apiFetch<RequisitionDetail>(
+    `/api/procurement/requisitions/${id}/reject`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+}
+
+export function cancelRequisition(id: string, reason: string) {
+  return apiFetch<RequisitionDetail>(
+    `/api/procurement/requisitions/${id}/cancel`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+}
+
+export type PurchaseOrderStatus =
+  | "open"
+  | "partially_received"
+  | "received"
+  | "cancelled";
+
+export type PurchaseOrderLine = {
+  id: string;
+  lineNo: number;
+  productId: string;
+  sku: string;
+  productName: string;
+  uom: string;
+  productDeleted: boolean;
+  qtyOrdered: number;
+  unitCost: number;
+  lineTotal: number;
+  /** Derived from the goods receipt lines through `po_line_status`, never stored
+   *  (I6). */
+  qtyReceived: number;
+  qtyOutstanding: number;
+};
+
+export type PurchaseOrder = {
+  id: string;
+  poNumber: string;
+  status: PurchaseOrderStatus;
+  supplierId: string;
+  supplierCode: string;
+  supplierName: string;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  requisitionId: string | null;
+  requisitionNumber: string | null;
+  totalAmount: number;
+  orderedAt: string;
+  /** A business date as `YYYY-MM-DD`, not an instant — rendered as it arrives, so
+   *  no timezone can move it a day (§2.5.3). */
+  expectedAt: string | null;
+  createdById: string;
+  createdByName: string;
+  cancelledById: string | null;
+  cancelledByName: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  updatedAt: string;
+  lineCount: number;
+  qtyOrdered: number;
+  qtyReceived: number;
+  qtyOutstanding: number;
+};
+
+// The return type of getPurchaseOrder.
+// fallow-ignore-next-line unused-type
+export type PurchaseOrderDetail = PurchaseOrder & { lines: PurchaseOrderLine[] };
+
+export type PurchaseOrderQuery = ListQuery & {
+  status?: PurchaseOrderStatus | "";
+  supplierId?: string;
+};
+
+export function listPurchaseOrders(query: PurchaseOrderQuery = {}) {
+  return apiFetch<ListResponse<PurchaseOrder>>(
+    `/api/procurement/purchase-orders${queryString(query, {
+      status: query.status || undefined,
+      supplierId: query.supplierId,
+    })}`,
+  );
+}
+
+export function getPurchaseOrder(id: string) {
+  return apiFetch<PurchaseOrderDetail>(
+    `/api/procurement/purchase-orders/${id}`,
+  );
+}
+
+export function cancelPurchaseOrder(id: string, reason: string) {
+  return apiFetch<PurchaseOrderDetail>(
+    `/api/procurement/purchase-orders/${id}/cancel`,
+    { method: "POST", body: JSON.stringify({ reason }) },
   );
 }

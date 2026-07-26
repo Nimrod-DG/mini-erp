@@ -114,6 +114,7 @@ func New(deps Deps) *fiber.App {
 	// are deactivated (§6.9.4, I5) — the route not existing is the enforcement.
 
 	registerInventory(api, s)
+	registerProcurement(api, s)
 
 	return app
 }
@@ -160,6 +161,55 @@ func registerInventory(api fiber.Router, s *server) {
 	// the person who counted the shelf is not always the person who may say the
 	// count was wrong.
 	inv.Post("/adjustments", at(approver), s.createAdjustment)
+}
+
+// registerProcurement mounts §9.4, the same way registerInventory mounts §9.5:
+// one RequireModule per route, at the level the spec gives it, so this table is
+// the readable copy of that one.
+//
+// Two of the levels are lower than the action sounds, and both are deliberate:
+//
+//   - `/cancel` on a requisition is `user`, not `approver`, because §6.9.2 gives
+//     the *creator* the right to cancel their own draft, and a creator holds
+//     `user`. Which of the two rules applies is decided inside the handler,
+//     against the row — a record rule the middleware cannot express.
+//   - `PATCH` and `/submit` are `user` and additionally creator-only, for the
+//     same reason.
+//
+// The receipt endpoint — POST /purchase-orders/:id/receipts — is Session B.
+func registerProcurement(api fiber.Router, s *server) {
+	proc := api.Group("/procurement")
+
+	at := func(min identity.RoleLevel) fiber.Handler {
+		return middleware.RequireModule(ModuleProcurement, min)
+	}
+	viewer, user := identity.RoleViewer, identity.RoleUser
+	approver, admin := identity.RoleApprover, identity.RoleAdmin
+
+	proc.Get("/suppliers", at(viewer), s.listSuppliers)
+	proc.Post("/suppliers", at(admin), s.createSupplier)
+	proc.Get("/suppliers/:id", at(viewer), s.getSupplier)
+	proc.Patch("/suppliers/:id", at(admin), s.patchSupplier)
+	proc.Delete("/suppliers/:id", at(admin), s.deleteSupplier)
+	proc.Post("/suppliers/:id/restore", at(admin), s.restoreSupplier)
+
+	proc.Get("/requisitions", at(viewer), s.listRequisitions)
+	proc.Post("/requisitions", at(user), s.createRequisition)
+	proc.Get("/requisitions/:id", at(viewer), s.getRequisition)
+	proc.Patch("/requisitions/:id", at(user), s.patchRequisition)
+	proc.Post("/requisitions/:id/submit", at(user), s.submitRequisition)
+	proc.Post("/requisitions/:id/approve", at(approver), s.approveRequisition)
+	proc.Post("/requisitions/:id/reject", at(approver), s.rejectRequisition)
+	proc.Post("/requisitions/:id/cancel", at(user), s.cancelRequisition)
+
+	proc.Get("/purchase-orders", at(viewer), s.listPurchaseOrders)
+	proc.Get("/purchase-orders/:id", at(viewer), s.getPurchaseOrder)
+	proc.Post("/purchase-orders/:id/cancel", at(approver), s.cancelPurchaseOrder)
+
+	// No DELETE on any of the three documents, deliberately. Requisitions and
+	// orders are cancelled, never removed (§6.9.2, I5), and §9.6.1 says in as
+	// many words not to add one for symmetry. The route not existing is the
+	// enforcement.
 }
 
 // errorHandler renders anything that escapes a handler in the §9.8 envelope.

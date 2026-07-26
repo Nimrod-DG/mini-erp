@@ -28,7 +28,6 @@ import (
 
 	"github.com/DGosal/mini-erp/backend/internal/db"
 	"github.com/DGosal/mini-erp/backend/internal/httpx"
-	"github.com/DGosal/mini-erp/backend/internal/identity"
 )
 
 // ModuleInventory is the module code from the naming contract.
@@ -106,39 +105,6 @@ type warehouseRow struct {
 }
 
 // --------------------------------------------------------------------------
-// Soft-delete visibility.
-// --------------------------------------------------------------------------
-
-// wantsDeleted reads `?includeDeleted=true` (§9.0) and reports separately
-// whether the caller asked and whether they may.
-//
-// Two return values rather than one refusal, because this must not write a
-// response: a helper that signalled failure by returning what httpx.Fail
-// returned would be signalling with nil, and the caller's `if err != nil` would
-// never fire (see parseMatrix). The caller writes the 403.
-//
-// `admin` is the bar because §9.0 puts the restore workflow there — the recycle
-// bin is an administrative view, and a viewer seeing deleted rows in an ordinary
-// list would have no way to tell them apart from live ones.
-func wantsDeleted(c *fiber.Ctx, caller *identity.Identity) (want, allowed bool) {
-	want = c.QueryBool("includeDeleted", false)
-	return want, caller.LevelFor(ModuleInventory) >= identity.RoleAdmin
-}
-
-// refuseDeletedView is the 403 for a viewer asking to see the recycle bin. It
-// reuses insufficient_module_role with the level that would have worked, so the
-// console can name the dropdown to change (§7).
-func refuseDeletedView(c *fiber.Ctx, caller *identity.Identity) error {
-	return httpx.FailWith(c, fiber.StatusForbidden, "insufficient_module_role",
-		"Only an inventory administrator can see deleted records.",
-		map[string]any{
-			"module":   ModuleInventory,
-			"required": identity.RoleAdmin.String(),
-			"actual":   caller.LevelFor(ModuleInventory).String(),
-		})
-}
-
-// --------------------------------------------------------------------------
 // Products.
 // --------------------------------------------------------------------------
 
@@ -153,9 +119,9 @@ func (s *server) listProducts(c *fiber.Ctx) error {
 	if err != nil {
 		return malformed(c, "%s", err)
 	}
-	withDeleted, allowed := wantsDeleted(c, caller)
+	withDeleted, allowed := wantsDeleted(c, caller, ModuleInventory)
 	if withDeleted && !allowed {
-		return refuseDeletedView(c, caller)
+		return refuseDeletedView(c, caller, ModuleInventory)
 	}
 
 	var total int64
@@ -542,9 +508,9 @@ func (s *server) listWarehouses(c *fiber.Ctx) error {
 	if err != nil {
 		return malformed(c, "%s", err)
 	}
-	withDeleted, allowed := wantsDeleted(c, caller)
+	withDeleted, allowed := wantsDeleted(c, caller, ModuleInventory)
 	if withDeleted && !allowed {
-		return refuseDeletedView(c, caller)
+		return refuseDeletedView(c, caller, ModuleInventory)
 	}
 
 	var total int64

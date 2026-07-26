@@ -4,25 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/AppShell";
 import { ErrorNotice } from "../../components/ListStates";
 import { PasswordField } from "../../components/PasswordField";
-import { ApiError, createTenant, type ModuleCode } from "../../lib/api";
-
-const MODULES: { code: ModuleCode; label: string; description: string }[] = [
-  {
-    code: "procurement",
-    label: "Procurement",
-    description: "Requisitions, purchase orders, and goods receipts",
-  },
-  {
-    code: "inventory",
-    label: "Inventory",
-    description: "Warehouses, products, and the stock ledger",
-  },
-  {
-    code: "finance",
-    label: "Finance",
-    description: "Chart of accounts and journal entries",
-  },
-];
+import { useAsync } from "../../hooks/useAsync";
+import {
+  ApiError,
+  createTenant,
+  listModuleCatalogue,
+  type ModuleCode,
+} from "../../lib/api";
 
 /** A handful of zones rather than the full IANA list: this is a demo console for
  *  an Indonesian ERP, and a 400-entry select is worse than five right answers.
@@ -58,9 +46,22 @@ export function TenantNew() {
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [timezone, setTimezone] = useState(TIMEZONES[0]);
-  const [modules, setModules] = useState<ModuleCode[]>(
-    MODULES.map((m) => m.code),
-  );
+
+  // The catalogue comes from `GET /admin/modules` rather than from a list in
+  // this file. The three codes were hardcoded here until Phase 5, which worked
+  // and was still wrong twice over: the names and descriptions were a second
+  // copy of the `modules` rows that nothing kept in step, and a fourth module
+  // added to the catalogue would have been invisible to the one screen whose job
+  // is choosing modules.
+  //
+  // `modules` starts empty and is filled once the catalogue arrives, so the
+  // default stays "everything available" without this file knowing what that is.
+  const [modules, setModules] = useState<ModuleCode[]>([]);
+  const { state: catalogue } = useAsync("module-catalogue", async () => {
+    const entries = await listModuleCatalogue();
+    setModules(entries.map((entry) => entry.code));
+    return entries;
+  });
 
   const [adminName, setAdminName] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
@@ -163,31 +164,38 @@ export function TenantNew() {
             within it and can never grant what is not enabled here.
           </p>
 
-          {MODULES.map((module) => (
-            <label
-              key={module.code}
-              className="flex min-h-11 items-start gap-3 py-1"
-            >
-              <input
-                type="checkbox"
-                checked={modules.includes(module.code)}
-                onChange={(event) => {
-                  setModules((current) =>
-                    event.target.checked
-                      ? [...current, module.code]
-                      : current.filter((code) => code !== module.code),
-                  );
-                }}
-                className="mt-1 size-4"
-              />
-              <span>
-                <span className="block text-sm">{module.label}</span>
-                <span className="block text-xs text-secondary">
-                  {module.description}
+          {catalogue.status === "loading" && (
+            <div className="h-24 animate-pulse rounded bg-raised" />
+          )}
+          {catalogue.status === "error" && (
+            <ErrorNotice error={catalogue.error} />
+          )}
+          {catalogue.status === "ready" &&
+            catalogue.data.map((module) => (
+              <label
+                key={module.code}
+                className="flex min-h-11 items-start gap-3 py-1"
+              >
+                <input
+                  type="checkbox"
+                  checked={modules.includes(module.code)}
+                  onChange={(event) => {
+                    setModules((current) =>
+                      event.target.checked
+                        ? [...current, module.code]
+                        : current.filter((code) => code !== module.code),
+                    );
+                  }}
+                  className="mt-1 size-4"
+                />
+                <span>
+                  <span className="block text-sm">{module.name}</span>
+                  <span className="block text-xs text-secondary">
+                    {module.description}
+                  </span>
                 </span>
-              </span>
-            </label>
-          ))}
+              </label>
+            ))}
         </section>
 
         <section className="space-y-4 rounded-lg border border-hairline bg-surface p-5">

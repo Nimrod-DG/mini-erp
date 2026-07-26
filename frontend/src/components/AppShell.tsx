@@ -43,11 +43,21 @@ function navItems(me: Me): NavItem[] {
 
   const items: NavItem[] = [{ to: "/", label: "Dashboard" }];
 
-  // Procurement and Finance arrive in Phases 5-6. The entitlement filter is
-  // already the real one, so each phase adds a path here and nothing else: an
-  // item with nowhere to go is left out rather than linking at a route that
-  // redirects.
+  // Finance arrives in Phase 6. The entitlement filter is already the real one,
+  // so that phase adds a path here and nothing else: an item with nowhere to go
+  // is left out rather than linking at a route that redirects.
   const modulePaths: Partial<Record<ModuleCode, NavItem>> = {
+    procurement: {
+      // Requisitions first, because that is where buying starts: an order is not
+      // created by hand, it is what approving a requisition produces.
+      to: "/procurement/requisitions",
+      label: "Procurement",
+      children: [
+        { to: "/procurement/requisitions", label: "Requisitions" },
+        { to: "/procurement/orders", label: "Purchase orders" },
+        { to: "/procurement/suppliers", label: "Suppliers" },
+      ],
+    },
     inventory: {
       to: "/inventory/products",
       label: "Inventory",
@@ -73,6 +83,72 @@ function navItems(me: Me): NavItem[] {
   }
 
   return items;
+}
+
+/**
+ * The bottom tab bar of §10.7.3: the three or four most-used destinations, below
+ * `md`, where the sidebar is a drawer behind a hamburger.
+ *
+ * "The bottom bar is worth the effort: on the goods-receipt flow the user is
+ * holding a phone one-handed while looking at boxes, and top-of-screen navigation
+ * is out of thumb reach."
+ *
+ * Tabs respect entitlements exactly like the sidebar — a user with nothing in
+ * Inventory gets three tabs, not a disabled fourth. Cosmetic, like the rest of
+ * this file (I12).
+ *
+ * This is a *shortcut*, not the whole map: the drawer still holds everything.
+ * Suppliers and Warehouses are deliberately absent, because master data is not
+ * what anyone reaches for one-handed in a warehouse aisle.
+ */
+function tabItems(me: Me): { to: string; label: string; icon: string }[] {
+  if (me.user.tenantRole === "superadmin") return [];
+
+  const tabs = [{ to: "/", label: "Home", icon: "◉" }];
+  if (me.moduleRoles.procurement) {
+    tabs.push({ to: "/procurement/requisitions", label: "Requests", icon: "▤" });
+    tabs.push({ to: "/procurement/orders", label: "Orders", icon: "▦" });
+  }
+  if (me.moduleRoles.inventory) {
+    tabs.push({ to: "/inventory/stock", label: "Stock", icon: "▣" });
+  }
+  // One tab is not a navigation aid — it is a button that says where you already
+  // are. The drawer covers that case.
+  return tabs.length > 1 ? tabs : [];
+}
+
+function BottomTabs({ me }: { me: Me }) {
+  const tabs = tabItems(me);
+  if (tabs.length === 0) return null;
+
+  return (
+    <nav
+      aria-label="Quick navigation"
+      className="fixed inset-x-0 bottom-0 z-30 flex border-t border-hairline bg-surface md:hidden"
+      // Clears the iOS home indicator, which otherwise sits on top of the tabs.
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
+      {tabs.map((tab) => (
+        <NavLink
+          key={tab.to}
+          to={tab.to}
+          end={tab.to === "/"}
+          className={({ isActive }) =>
+            `flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-xs ${
+              isActive ? "text-accent" : "text-secondary"
+            }`
+          }
+        >
+          {/* The glyph is decorative: the label underneath is the accessible name,
+              and an icon-only tab bar is a guessing game (§10.7.5). */}
+          <span aria-hidden="true" className="text-base leading-none">
+            {tab.icon}
+          </span>
+          {tab.label}
+        </NavLink>
+      ))}
+    </nav>
+  );
 }
 
 /** RoleBadges renders the per-module levels the top bar carries (§10.1). */
@@ -243,7 +319,12 @@ export function AppShell({
           </>
         )}
 
-        <main key={location.pathname} className="min-w-0 flex-1 px-4 py-6 sm:px-6">
+        {/* pb-20 below md leaves room for the fixed tab bar, which would
+            otherwise cover the last row of every table. */}
+        <main
+          key={location.pathname}
+          className="min-w-0 flex-1 px-4 pb-20 pt-6 sm:px-6 md:pb-6"
+        >
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h1 className="text-xl font-semibold">{title}</h1>
             {actions}
@@ -251,6 +332,8 @@ export function AppShell({
           {children}
         </main>
       </div>
+
+      <BottomTabs me={me} />
     </div>
   );
 }

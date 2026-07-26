@@ -35,6 +35,44 @@ func tenantScope(c *fiber.Ctx) (*identity.Identity, *gorm.DB, error) {
 	return id, tx, nil
 }
 
+// --------------------------------------------------------------------------
+// Soft-delete visibility, shared by every master-data list (§9.0).
+// --------------------------------------------------------------------------
+
+// wantsDeleted reads `?includeDeleted=true` and reports separately whether the
+// caller asked and whether they may.
+//
+// Two return values rather than one refusal, because this must not write a
+// response: a helper that signalled failure by returning what httpx.Fail
+// returned would be signalling with nil, and the caller's `if err != nil` would
+// never fire (see parseMatrix). The caller writes the 403.
+//
+// `admin` is the bar because §9.0 puts the restore workflow there — the recycle
+// bin is an administrative view, and a viewer seeing deleted rows in an ordinary
+// list would have no way to tell them apart from live ones.
+//
+// The module is a parameter because the rule is the same in every module and the
+// level is not: products, warehouses, and suppliers each answer to their own
+// module's `admin`.
+func wantsDeleted(c *fiber.Ctx, caller *identity.Identity, module string) (want, allowed bool) {
+	want = c.QueryBool("includeDeleted", false)
+	return want, caller.LevelFor(module) >= identity.RoleAdmin
+}
+
+// refuseDeletedView is the 403 for a viewer asking to see the recycle bin. It
+// reuses insufficient_module_role with the level that would have worked, so the
+// console can name the dropdown to change (§7) — and so a client cannot tell
+// this refusal from the middleware's and does not have to.
+func refuseDeletedView(c *fiber.Ctx, caller *identity.Identity, module string) error {
+	return httpx.FailWith(c, fiber.StatusForbidden, "insufficient_module_role",
+		fmt.Sprintf("Only a %s administrator can see deleted records.", module),
+		map[string]any{
+			"module":   module,
+			"required": identity.RoleAdmin.String(),
+			"actual":   caller.LevelFor(module).String(),
+		})
+}
+
 // slugPattern is what a URL-safe tenant slug looks like. Anchored, so a slug
 // cannot smuggle a slash or a space into a path.
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -57,6 +95,41 @@ func malformed(c *fiber.Ctx, format string, args ...any) error {
 // one that never existed — that difference is a cross-tenant existence oracle.
 func notFound(c *fiber.Ctx, what string) error {
 	return httpx.Fail(c, fiber.StatusNotFound, "not_found", what+" was not found.")
+}
+
+// forbidden is the §9.8 403 for a record-level refusal: the caller holds the
+// level the route requires, and this particular row is still not theirs to act
+// on. Segregation of duties and "only the author may edit their draft" are both
+// this shape — rules that a role level cannot express, so they cannot live in
+// the middleware.
+func forbidden(c *fiber.Ctx, format string, args ...any) error {
+	return httpx.Fail(c, fiber.StatusForbidden, "forbidden", fmt.Sprintf(format, args...))
+}
+
+// stateConflict is §9.8's "409 state conflict": the request was well formed and
+// legal, and the document has since moved somewhere the action does not apply.
+//
+// A distinct code from `in_use`, which means something else — that something
+// still references this row — and a client that cannot tell "this requisition
+// has already been approved" from "three orders reference this supplier" cannot
+// tell the user what to do next. `details.status` is the state the document is
+// actually in, so a screen can refresh itself rather than re-asking.
+func stateConflict(c *fiber.Ctx, what, current string, allowed ...string) error {
+	return httpx.FailWith(c, fiber.StatusConflict, "state_conflict",
+		fmt.Sprintf("%s is %s. %s", what, current,
+			"Reload the document to see where it is now."),
+		map[string]any{"status": current, "allowed": allowed})
+}
+
+// unprocessable is §9.8's "422 business-rule violation": the request is
+// understood and refused by a rule of the business rather than of the schema.
+//
+// The code names the rule — `empty_requisition`, `reason_required`,
+// `supplier_required` — so the screen can put the message next to the field that
+// is missing instead of in a general-purpose banner.
+func unprocessable(c *fiber.Ctx, code, format string, args ...any) error {
+	return httpx.Fail(c, fiber.StatusUnprocessableEntity, code,
+		fmt.Sprintf(format, args...))
 }
 
 // pathUUID reads a UUID path parameter. A malformed one is a 404 rather than a

@@ -15,6 +15,7 @@ Filled in as they are established, so a later session does not go hunting.
 | Firebase dev web app | `erp-mini` — appId `1:889259985673:web:1bd9b28a7769be3142e1d8` |
 | Firebase dev service account | `backend/secrets/erp-project-b66ce-firebase-adminsdk-fbsvc-47d25660f5.json` (gitignored, never committed) |
 | Sign-in provider | Email/Password, enabled and the only one — confirmed 2026-07-26 |
+| Password reset | **Working, confirmed by the user 2026-07-26.** The emailed link opens Firebase's hosted page, not this app's `/auth/action` — see the Phase 2 log and the Phase 9 note about `callbackUri` |
 | Firebase **prod** project ID | *not created — Phase 9* |
 | Hosting site | `erp-project-b66ce`, auto-linked at app registration, unused until Phase 9 |
 | Database host | local Docker (Phase 0–8); host chosen at Phase 9 |
@@ -26,8 +27,9 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
-**Phase:** 4 — done
-**Next action:** open [`phases/phase-5-procurement.md`](phases/phase-5-procurement.md) in a **new session**
+**Phase:** 5 — **Session A done** (requisitions, POs, suppliers, numbering)
+**Next action:** open [`phases/phase-5-procurement.md`](phases/phase-5-procurement.md)
+and build **Session B — the goods receipt** in a **new session**
 
 Migration files that now exist (`backend/migrations/`), applied in this order by
 `cmd/migrate`:
@@ -40,8 +42,9 @@ Migration files that now exist (`backend/migrations/`), applied in this order by
 | `003_constraints.up.sql` | composite FKs, CHECKs, line numbering, partial unique indexes, the index set |
 | `004_views_triggers.up.sql` | both views, `grl_no_over_receipt`, `jel_balanced`, the two terminal-state triggers |
 | `005_rls_grants.up.sql` | RLS enable/force/policy, grants, ledger and superadmin revokes, `seed_tenant_accounts()` |
+| `006_pr_cancel_from_draft.up.sql` | relaxes `pr_submitted_has_timestamp` so a draft can be cancelled without a submission that never happened — see *Decisions* |
 
-Backend packages as of Phase 4:
+Backend packages as of Phase 5A:
 
 | Package | Contents |
 |---|---|
@@ -49,15 +52,21 @@ Backend packages as of Phase 4:
 | `internal/identity` | `Identity`, `Resolve` — the one database lookup behind I9 — plus `RoleLevel` and **`LevelFor`**, the single function every permission check goes through |
 | `internal/middleware` | `RequestID` `FirebaseAuth` `ResolveIdentity` `TenantTx` `RequireModule` `RequireSuperadmin` `RequireTenantAdmin`, and the accessors `IdentityFrom` / `TxFrom` |
 | `internal/httpx` | the §9.8 error envelope (`Fail`, `FailWith`, `Unauthenticated`), the §9.0 list contract (`ParseList`, `ListResponse`), and **`Numeric`** — the exact-decimal type every NUMERIC crosses the wire as |
-| `internal/db` | pools, `WithTenant`, migrations, and `SQLState` / `IsUniqueViolation` for mapping constraints to business outcomes |
-| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, and the sixteen `/inventory/*` handlers |
-| `testsupport` | `FakeVerifier`, `FakeUsers`, the shared HTTP `Harness` (used by both test packages), and the tenant/user/inventory fixtures |
+| **`internal/docnum`** | **`Allocate(tx, tenant, docType)`** — §8.1 numbering, in the caller's transaction. `AllocateAt` is the same thing with an explicit instant, which is how E5 can fail. Constants `PR` `PO` `GR` `JE` |
+| `internal/db` | pools, `WithTenant`, migrations, and `SQLState` / `IsUniqueViolation` / `ConstraintName` for mapping constraints to business outcomes |
+| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, the sixteen `/inventory/*` handlers, and the **seventeen `/procurement/*` handlers** |
+| `testsupport` | `FakeVerifier`, `FakeUsers`, the shared HTTP `Harness` (used by both test packages), the fixtures, and `WithTenantOn` / `NoSuchTenant` |
 
-Frontend routes as of Phase 4: `/login` `/auth/action` `/` `/admin/tenants`
+Frontend routes as of Phase 5A: `/login` `/auth/action` `/` `/admin/tenants`
 `/admin/tenants/new` `/admin/tenants/:id` `/settings/users` `/settings/users/new`
 `/settings/users/:id` `/inventory/products` `/inventory/products/new`
 `/inventory/products/:id` `/inventory/warehouses` `/inventory/stock`
-`/inventory/ledger`. All signed-in screens render inside `AppShell`.
+`/inventory/ledger` `/procurement/requisitions` `/procurement/requisitions/new`
+`/procurement/requisitions/:id` `/procurement/orders` `/procurement/orders/:id`
+`/procurement/suppliers`. All signed-in screens render inside `AppShell`.
+
+**Session B adds one route to each side**: `POST /api/procurement/purchase-orders/:id/receipts`
+and `/procurement/orders/:id/receive`. Everything else it needs is listed below.
 
 ### What a module phase inherits
 
@@ -81,6 +90,13 @@ read it before building procurement rather than deriving the shape again.
 | Comparing or summing two NUMERICs | Write it in SQL. `Numeric` has no arithmetic on purpose — `belowReorderPoint` and `shortfall` are computed by PostgreSQL and sent as answers |
 | Hide a control by level, in the browser | `holds(me.moduleRoles, "inventory", "admin")` from `lib/levels.ts`, and `<RequireModule module=…>` for a whole route. Cosmetic (I12) |
 | Render a timestamp | `formatDateTime(iso, me.tenant.timezone)` from `lib/format.ts` — the tenant's zone, never the browser's (I7) |
+| Allocate a document number | `docnum.Allocate(tx, caller.TenantID, docnum.GR)`, on the **same** `tx` as the insert. Never a sequence, never `to_char(now(), …)` |
+| Refuse because the document moved on | `stateConflict(c, "This purchase order", current, "open")` → 409 `state_conflict`, with `details.status` so a screen can refresh |
+| Refuse on a business rule | `unprocessable(c, "<code>", …)` → 422. Codes so far: `empty_requisition` `reason_required` `supplier_required` `over_receipt` |
+| Refuse on a record-level rule | `forbidden(c, …)` → 403 `forbidden`. Segregation of duties is `self_approval_forbidden`, which is its own code |
+| Lock a document before checking its status | `lockRequisition` in `procurement_requisitions.go` is the worked example: `SELECT … FOR UPDATE`, *then* read `status`. Read-then-check is a race (§8.6.2, H4) |
+| A status chip or filter chips, in the browser | `StatusChip` / `StatusFilter` from `components/StatusChip.tsx`; the words come from `statusLabel` in `lib/format.ts` |
+| A master-data list screen | `MasterDataList` from `components/MasterDataList.tsx` — search, "show deleted", the four §10.7.6 states, pagination — plus `useRowActions` for the per-row toast handling. Suppliers and warehouses both use it |
 
 **Trap 1 — a helper must never signal failure by returning what `httpx.Fail`
 returned.** `Fail` returns `nil` deliberately: the body is already written, and
@@ -171,6 +187,26 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 | 2026-07-26 | Action outcomes are **toasts**; load failures stay inline as `ErrorNotice` | User preference, and the split is principled rather than cosmetic. A failed *load* belongs where the data would have been — a toast there leaves an empty screen with no explanation once it fades. A refused or successful *action* belongs in a toast: the user pressed a button and is looking for the answer, and putting a row-level refusal inline shifts the table and lands the message where their eye is not. Refusals last 12s and are dismissible; confirmations 4s. The bigger win was incidental: Save changes previously gave **no feedback at all** — it refetched and looked identical to having done nothing. |
 | 2026-07-26 | A deleted product's Status reads "Deleted", not "Active" | `is_active` really is still true, and the two columns really are different questions — but "Status: Active" next to a banner saying the product is deleted reads as a contradiction, and a reader cannot be expected to know there are two columns behind one word. Found in the walkthrough. |
 | 2026-07-26 | Cross-tenant and malformed-ID misses are `404`, never `403` | An admin probing another workspace's user ID must not be able to tell an ID that exists elsewhere from one that never existed — that difference is a cross-tenant existence oracle. `/tenant/users/banana` is a 404 for the same reason. |
+| 2026-07-26 | **Migration `006` relaxes `pr_submitted_has_timestamp` to `status IN ('draft','cancelled') OR submitted_at IS NOT NULL`** | §6.10.3 writes it as `status = 'draft' OR submitted_at IS NOT NULL`, which reads as "anything past draft has been submitted". True of `submitted`, `approved`, `rejected`; false of `cancelled` — §6.9.2 says in as many words that "a draft requisition may be cancelled by its creator", and such a requisition was never submitted. As written the constraint makes that transition impossible, and the only way past it is to stamp `submitted_at` with a submission that did not happen, in the column the status timeline renders from. A requisition cancelled *after* submission still carries the real timestamp, because cancelling never clears it. |
+| 2026-07-26 | Document numbering is its own package, `internal/docnum`, and exports **`AllocateAt`** alongside `Allocate` | Four document types across two modules allocate from it, so it is not procurement's. The package boundary also buys the tests: `internal/api`'s tests cannot import `testsupport` (which imports `api`), so Group E could only have been written through HTTP — and E3's twenty concurrent allocations, E4's rollback, and E5's timezone are not visible in a response body. `AllocateAt` takes the instant to date the allocation at; every caller in the application passes now. It exists because **E5 cannot fail without a controllable clock** — no real timezone moves an ordinary mid-month afternoon into another month, so a version using `now()` would pass whether the tenant-timezone conversion were there or not on all but two days a month. The seam is one `COALESCE` inside the same expression production evaluates. |
+| 2026-07-26 | 409s that mean "the document has moved on" carry a new code, **`state_conflict`** | §9.8 names "409 state conflict" as a category but gives it no string, and the naming contract's list has no member that fits. `in_use` means something else — that something still *references* this row — and a client that cannot tell "this requisition was approved an hour ago" from "three orders reference this supplier" cannot tell the user what to do. `details.status` carries where the document actually is, so a screen can refresh rather than re-ask. |
+| 2026-07-26 | Three 422 codes rather than one generic one: `empty_requisition`, `reason_required`, `supplier_required` | §9.8 says only "422 business-rule violation". Each of these is a different missing thing and the screen's right response differs — add a line, focus the reason box, show a supplier picker. One code would put every business refusal in the same banner and make the client parse prose to tell them apart, which is what §9.8's whole `error`/`message` split exists to avoid. |
+| 2026-07-26 | **Editing a draft requisition replaces its lines, which is a `DELETE`** — the second and last exception to I5 | I5 says master data soft-deletes, documents cancel, ledgers append; a draft's lines are none of those three. A draft is a form the user has not committed: nothing references its lines, `005` grants `erp_app` `DELETE` on `purchase_requisition_lines` deliberately (only the ledger tables are revoked), and the `qty > 0` CHECK means a line cannot be zeroed out instead. Without it, a mistyped line can only be fixed by cancelling and re-keying the requisition — consuming a document number to fix a typo, which is exactly the gap §9.6.1 calls "creatable but not editable". Scoped to `lines` on a `draft`, by its author. Once submitted, the status check freezes them (C5). |
+| 2026-07-26 | A requisition line's `est_unit_cost` defaults to the product's `standard_cost`, not to zero | The column defaults to 0 and nothing would complain — but that zero is copied to the PO line as `unit_cost`, and from there to the goods receipt's journal entry, which would post **Dr 0 / Cr 0**. `jel_balanced` passes it happily: zero equals zero. A balanced entry for nothing is worse than an error, because it looks fine, and Session B's confirmation panel is the screenshot the project exists for. Same reasoning as Phase 4's adjustment `unit_cost`. |
+| 2026-07-26 | Approval sets the PO's `expected_at` to today **in the tenant's timezone** plus the supplier's `lead_time_days` | §8.3 lists five steps and does not mention `expected_at`, but the column exists, `suppliers.lead_time_days` exists and is otherwise never read, and the PO list has a column with nothing in it. One expression in the insert. The date is computed `(now() AT TIME ZONE t.timezone)::date`, which is the §2.5.3 rule, and crosses the wire as `YYYY-MM-DD` text rather than as an instant so no browser can render it a day early. |
+| 2026-07-26 | Cancelling a requisition or a purchase order **requires a reason** | §6.9.2: cancellation "records who cancelled, when, and why — the same shape as approve and reject", and rejection's reason is mandatory both in the handler (C3) and in the database (G13). No CHECK constraint enforces the cancel reason, so this one is the handler's alone; noted in case a later phase wants the constraint. |
+| 2026-07-26 | Approval checks the **status before** the self-approval rule | Both are refusals and either order passes C2 and C4. But telling the author of an already-approved requisition "somebody else has to approve this" sends them to argue with the wrong person, when the answer is "it was approved yesterday". Status first, then segregation of duties. |
+| 2026-07-26 | `wantsDeleted` / `refuseDeletedView` moved to `validate.go` and take a module code | Second concrete use case, which is the bar §4 sets. The rule is identical in every module and the *level* is not — products answer to inventory `admin`, suppliers to procurement `admin` — so the module is the parameter and nothing else changed. |
+| 2026-07-26 | `MasterDataList` and `useRowActions` extracted, and Phase 4's `WarehouseList` refactored onto them | §12A.4 in as many words: "catching a duplicated form component after two copies is a ten-minute fix; after five it is an afternoon." Suppliers is the second copy, and `npx fallow audit` reported the pair as a 220-line clone. What is shared is the scaffolding — search, the recycle-bin toggle, the four §10.7.6 states, pagination — so the fields stay with their entity behind a `row` render prop rather than moving into a config object that would grow a case per column type. Clone groups fell from 24 to 19 and the two largest disappeared. |
+| 2026-07-26 | The requisition detail screen opens **read-only, with an explicit Edit** | The opposite of Phase 4's product detail, whose live-form-on-load was the biggest of the three things the walkthrough disliked: there was no reading mode and no point at which you had committed to changing something. Warehouses and suppliers already work this way, so this makes three screens out of four agree; product detail is the outlier and is worth revisiting. |
+| 2026-07-26 | The frontend route is `/procurement/orders`, the API path is `/procurement/purchase-orders` | Both are as specified — §10.3 names the screen, §9.4 names the endpoint. They differ, and that is fine: the URL a person reads and the URL a client posts to are different audiences. Recorded because it looks like a typo when you meet it. |
+| 2026-07-26 | `POST /procurement/requisitions` always creates a **draft**; submitting is a second request | §10.3's create form offers "save draft or submit", which could have been a `submit: true` flag. Two calls instead: a client that dies between them leaves a draft the user can find and finish, rather than a document in a state nobody chose, and the second call's failure is reported instead of being folded into the first. |
+| 2026-07-26 | **The "401 rather than 404 means the route is wired" live check from Phases 3–4 does not prove that** | Measured this phase: `GET /api/nonexistent-path` also returns `401`. The auth chain is group middleware on `/api`, so it answers before the router can 404 — the 401 says the chain is mounted and nothing at all about the route table. What does prove it is `TestProcurementRoutesCarryTheLevelsFromTheSpec` (and its inventory twin), which walks every route in the spec table against the real `api.New` app and asserts the level each is registered at. |
+| 2026-07-26 | `testsupport.WarehousesPath` → **`TenantTxPath`**, and the route itself `/api/warehouses` → `/api/probe/tenant-tx` | Carried from Phase 4, fixed now. The old name was fine while no such endpoint existed and misleading the moment `/api/inventory/warehouses` shipped: someone reading a failing transaction test would find a real endpoint one path segment away and reasonably assume they were the same thing. It now sits in the `/api/probe/` namespace with the other test-only routes, where nothing real can collide with it. The handler is `tenantTxProbe`; it still reads warehouses, because that is what proves the transaction is live. |
+| 2026-07-26 | `/admin/tenants/new` reads its module list from **`GET /admin/modules`** instead of a constant in the file | Carried from Phase 4, which flagged `listModuleCatalogue` as an unused export and called it "the interesting one". Deleting the client function would have been the smaller change; wiring it up is the right one, because the hardcoded array was a second copy of the `modules` rows that nothing kept in step — and a fourth module added to the catalogue would have been invisible to the one screen whose job is choosing modules. The names and descriptions it now renders are identical to what was hardcoded, so nothing changed on screen. |
+| 2026-07-26 | `apiFetch` is no longer exported | Every endpoint has a named wrapper with a return type, and nothing outside `lib/api.ts` used it. A screen reaching past the wrappers would be a request whose shape nothing checks — the first step towards one URL spelled two ways. |
+| 2026-07-26 | The §10.7.3 **bottom tab bar** now exists, below `md` | Deferred through Phases 3-4 on the grounds that "a tab bar with one tab is not a navigation aid". Procurement makes that argument expire: Home, Requests, Orders, and Stock is four destinations. It is a *shortcut* and not the whole map — suppliers, warehouses, and settings stay in the drawer, because master data is not what anyone reaches for one-handed in a warehouse aisle, which is the case §10.7.3 gives for the bar existing at all. Tabs respect entitlements exactly like the sidebar, and `tabItems` still returns nothing when fewer than two would show. |
+| 2026-07-26 | The local superadmin was provisioned by a throwaway, deleted after use, rather than by `cmd/seed` | Carried from Phase 3 — `/admin/*` had been unreachable by hand for three phases. Phase 7 owns the seed script and §3.5.3 already specifies the deterministic-UID shape it should take, so building it now would be doing that work twice and probably differently. The throwaway followed §3.3's order (provider account first, row second, compensating delete on failure); the account and the SQL are recorded below so the next person does not need the program. |
 
 ---
 
@@ -366,6 +402,34 @@ else, and Phase 7's `seed-` prefixed accounts will not collide with either UID:
 
 The first has a real, deliverable address specifically so the password-reset
 email can be observed arriving.
+
+**Added in Phase 5A** — the platform superadmin, which the local database had
+never had (carried open from Phase 3). Not in a tenant, and deliberately not in
+the table above: it belongs to no workspace.
+
+| Email | Firebase UID | Password | Role |
+|---|---|---|---|
+| `superadmin@example.test` | `wBz85wzGcHfSdXMBtUYwM0JDsK63` | `superadmin123` | `superadmin`, `tenant_id NULL` |
+
+Verified by signing in and calling the API: `/api/me` returns
+`tenantRole: superadmin` with `tenant: null` and no module roles, and
+`/api/admin/tenants` returns the workspace list.
+
+**To recreate it on a fresh database** — Phase 7's seed script replaces this:
+
+1. Create the Firebase account (console, or `auth.Firebase.CreateUser`), and note
+   the UID it returns.
+2. Insert the row, which needs no tenant and gets none — the
+   `users_superadmin_has_no_tenant` CHECK makes `tenant_role = 'superadmin'` and
+   `tenant_id IS NULL` biconditional:
+
+```sql
+INSERT INTO users (id, tenant_id, firebase_uid, email, full_name, tenant_role)
+VALUES (gen_random_uuid(), NULL, '<uid>', '<email>', 'Platform superadmin', 'superadmin');
+```
+
+Provider account first, row second (§3.3): a `users` row pointing at a UID that
+does not exist is a login that fails with no clue why.
 
 **Deviations from spec:** six, all recorded in *Decisions taken* above — the
 status-code rollback in `TenantTx`, `FIREBASE_PROJECT_ID` becoming required,
@@ -777,3 +841,179 @@ with a test, not a cosmetic one — see
 
 **Next:** open [`phases/phase-5-procurement.md`](phases/phase-5-procurement.md)
 in a new session.
+
+## Phase 5, Session A — 2026-07-26
+
+**Done:** a requisition can be raised, edited while it is a draft, submitted,
+approved, rejected, or cancelled — and approval generates the purchase order, in
+the same transaction, with a number allocated from the tenant's own monthly
+counter. Seventeen `/api/procurement/*` routes cover suppliers (full CRUD, soft
+delete, restore, the in-use check), the requisition lifecycle, and the purchase
+order read side plus cancellation. Every route carries its own `RequireModule` at
+the level §9.4 gives it.
+
+Every state transition takes `SELECT … FOR UPDATE` on the requisition **before**
+reading its status, which is what makes two managers tapping Approve produce one
+purchase order and one clean 409 rather than two orders (§8.6.2).
+
+Received quantity is derived everywhere it appears: the order list and detail read
+`po_line_status`, and there is no `qty_received` column to drift from it (I6).
+
+Screens: `/procurement/requisitions` (status filter chips),
+`/procurement/requisitions/new`, `/procurement/requisitions/:id` (lines, status
+timeline, and the actions this reader may actually take, including editing a
+draft), `/procurement/orders` (status and supplier filters),
+`/procurement/orders/:id` (ordered against received per line), and
+`/procurement/suppliers`. `AppShell` gained the Procurement nav item and its three
+sub-items.
+
+**Tests green:** C1–C6, E1–E5, G4, G6, G7, G8, G12–G14, and **H4**, plus Groups A,
+B, F, I–J unchanged. **145 top-level tests** (217 including subtests), up from 100
+at Phase 4. `go test ./... -p 1` clean, `go vet` clean, `gofmt` clean, `tsc
+--noEmit`, `npm run build`, and `oxlint` all clean — oxlint reports only the four
+pre-existing fast-refresh warnings and none in new code.
+
+Group D and the rest of Group H are the goods receipt, which is Session B. **H4
+was written now**, though it is a Group H test, because this is the phase that
+builds the lock it is about — a `FOR UPDATE` nothing exercises is a comment.
+
+Beyond the listed IDs:
+
+- **`TestProcurementRoutesCarryTheLevelsFromTheSpec`** walks every §9.4 route and
+  asserts the level it is registered at, including the two that are lower than
+  they sound: `/cancel` and `/submit` are `user`, because §6.9.2 gives the
+  *creator* rights that no role level expresses, and the rest is decided against
+  the row.
+- **C2 is asserted against a tenant admin as well as an approver.** A tenant admin
+  resolves to `admin` in every module implicitly, so a self-approval rule written
+  in the middleware would let exactly the wrong person through.
+- **Isolation from two tenants**, through both lists, by ID on all three
+  documents, and on three different writes — with tenant B's own data re-read
+  afterwards, so the emptiness is a filtering result rather than a broken fixture.
+- The §9.0 list contract on the procurement lists, including that the status
+  filter is a server parameter: `?status=draft` returns a `totalItems` for the
+  whole result set, not a count of the current page.
+- A refused requisition **does not consume a document number**, asserted through
+  HTTP as well as by E4 directly.
+
+**Three mutations were run to check the tests bite rather than merely pass. All
+three were caught:**
+
+| Mutation | Result |
+|---|---|
+| `FOR UPDATE` removed from `lockRequisition` | **caught** — H4 got `500 internal_error` where it wanted a clean 409 |
+| `total_amount` computed as `SUM(qty) * SUM(cost)` | **caught** — C6 reported `29457.75, want 16001.50` |
+| `AND p.deleted_at IS NULL` added to the order line's product join | **caught** — G6 reported "the order has 0 lines, want 1" |
+
+The first is the interesting one. Without the lock, the *database* still prevented
+the second purchase order — `pr_terminal_immutable` refused the second UPDATE — so
+no data was corrupted. What the lock buys is the difference between a 409 the
+screen can explain and a 500 the user has to guess at. Belt and braces, with the
+belt doing the user-facing work, exactly as §8.6.3 describes for the receipt.
+
+The third is the mutation a later phase makes by reflex, and it is Trap 3 in *What
+a module phase inherits*. `TestG6OrderLinesStillResolveADeletedProductsName` now
+asserts it at the endpoint a user would notice, not just at the query level.
+
+**Live check against the local stack:** migration `006` applied cleanly to the
+running database and `pg_constraint` confirms the new definition. The API binary
+on `:8080` was rebuilt and replaced; it boots and `/api/health` is 200 without a
+token.
+
+**One thing earlier phases recorded is wrong, and is now corrected in
+*Decisions*:** "all N routes return `401` rather than `404` — they are wired" does
+not follow. `GET /api/nonexistent-path` returns `401` too, because the auth chain
+is group middleware on `/api` and answers before the router can 404. The route
+table is proved by the route-levels test, not by curl.
+
+**Deviations from spec:** fifteen, all recorded in *Decisions taken* above. The
+four worth knowing before Session B:
+
+- **`docnum.Allocate(tx, tenant, docnum.GR)`** takes the caller's transaction. The
+  receipt's GR number and the journal entry's JE number both come from it, in the
+  same transaction as the rest, or a rollback consumes a number.
+- **`state_conflict` is the 409 for a document that has moved on**, and
+  `unprocessable(c, "over_receipt", …)` is the shape Session B's 422 should take.
+- **A requisition line's cost defaults to the product's standard cost**, so the
+  journal entry Session B posts has a non-zero value to work with. A PO whose
+  lines cost zero produces a perfectly balanced Dr 0 / Cr 0 posting.
+- **Migration 006 exists**, so Session B's migrations start at `007` if it needs
+  one. It should not.
+
+**TODO(post-mvp) markers added:**
+- `frontend/src/lib/requisitionForm.ts:48` — replace the product `<select>` with a
+  search-as-you-type picker; it loads the §9.0 maximum of 100 and stops there.
+
+`frontend/src/pages/procurement/OrderDetail.tsx:22` carries a plain comment, not a
+marker: the receipt history and "Receive goods" belong on that screen in Session B,
+which is this phase rather than after it.
+
+**Known broken / left half-done:**
+
+- **Session B is the whole point of the phase and is not started.** `POST
+  /purchase-orders/:id/receipts`, Group D — especially **D8** — and the rest of
+  Group H (H1–H3, H5, H6) are all outstanding.
+- **No live browser walkthrough of the six new screens.** They build and lint
+  clean and the API is covered end to end, but nobody has signed in and raised a
+  requisition by hand. The dev account (`dgjy2019@gmail.com`) is a tenant admin,
+  so it can do every step *except* approve its own requisition — a second user
+  with `procurement: approver` is needed to walk the approval, and Phase 4's
+  walkthrough found three real problems, so this is worth doing before Session B
+  rather than after.
+- **`npx fallow audit` is not fully clean**, and the phase's "done when" asks for
+  it at the end of Session B. **Dead code is down to one finding** — `tailwindcss`
+  reported as a dev dependency used in production, which Phase 0 put there
+  deliberately and Phase 4 already ruled correct. What is left elsewhere:
+  - **20 clone groups**, down from 24 — the two largest (220 and 223 lines) are
+    gone, replaced by `MasterDataList`. The residue is 20-40 line fragments: two
+    table-header blocks between the requisition and order lists, and the
+    Edit/Save/Cancel button cluster shared by the two master-data rows. Below the
+    "duplicated component" bar; worth another look if Session B adds a third of
+    either.
+  - **`RequisitionDetailPage` is still flagged CRITICAL** at 138 lines and 18
+    cyclomatic, down from 305 and 32 after `Summary`, `LinesTable`, and
+    `ActionsPanel` were split out. Further splitting would fragment a page
+    component for a metric's sake.
+  - `min-w-[36rem]` and friends are advisory `css-token-drift`. A table's minimum
+    width is a one-off measurement per table; adding scale tokens for six of them
+    would be worse.
+
+  **Four `fallow-ignore-next-line unused-type` suppressions now sit in
+  `lib/api.ts`**, on the four types fallow reports as unused exports and which are
+  each the return type of an exported function — removing the export would make
+  that signature unusable. Phase 4 identified the class and said to suppress
+  rather than "fix"; this is that. Note the directive takes **only issue kinds**
+  after it: prose on the same line is parsed as further kinds and comes back as
+  two dozen "stale suppressions", which is how the first attempt went.
+- **Still no frontend tests at all.** §12.5 defines them; no phase brief has asked
+  for them, and the count is now six more untested screens.
+- `go test -race` still cannot run here — no C toolchain on `PATH`. CI runs it,
+  and H4 is now the second test that would genuinely benefit.
+- A freshly built API binary is running on `:8080`, having replaced the Phase 4
+  one. `make dev` restarts everything.
+
+**Five things carried from earlier phases were closed in this session**, all
+recorded in *Decisions taken*:
+
+- **The password reset email is confirmed working** — the last open item from
+  Phase 2, carried through three phases. The flow is end to end: the email
+  arrives, the link opens, and the reset completes. The `callbackUri` caveat in
+  the Phase 2 log still stands for Phase 9 — the emailed link lands on Firebase's
+  hosted page rather than this app's `/auth/action` — but the mechanism works.
+- **A superadmin exists in the local database**, so `/admin/*` is reachable by
+  hand for the first time. Account and recreation SQL are in *Project facts*.
+- **The `/api/warehouses` probe route is renamed** `/api/probe/tenant-tx`.
+- **`listModuleCatalogue` is wired into `/admin/tenants/new`**, which no longer
+  carries its own copy of the module list; `apiFetch` is no longer exported.
+- **The §10.7.3 bottom tab bar exists**, below `md`.
+
+The five inventory-screen readability candidates from Phase 4 are **deliberately
+still open**: they belong to a phase where the frontend is the focus, not to this
+one. Worth knowing that one of them got worse rather than better — the requisition
+detail screen built here opens read-only with an explicit Edit, and warehouses and
+suppliers already did, so `/inventory/products/:id` is now the only screen of four
+that has no reading mode.
+
+**Next:** the walkthrough above, then **Session B** of
+[`phases/phase-5-procurement.md`](phases/phase-5-procurement.md) — read §8.4 and
+§8.6 twice — in a new session.

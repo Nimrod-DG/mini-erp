@@ -335,6 +335,56 @@ func (f *TenantFixture) NewGoodsReceiptLine(t *testing.T, grID, poLineID, produc
 	return id
 }
 
+// NewSupplier creates an extra supplier, for the tests that need two — a
+// delete refused for one must not refuse the other.
+func (f *TenantFixture) NewSupplier(t *testing.T, name string) uuid.UUID {
+	t.Helper()
+	n := next()
+	id := uuid.New()
+	f.Must(t, func(tx *gorm.DB) error {
+		return tx.Exec(`
+			INSERT INTO suppliers (id, tenant_id, code, name)
+			VALUES (?, ?, ?, ?)`, id, f.ID, fmt.Sprintf("SUP-%d", n), name).Error
+	})
+	return id
+}
+
+// NewRequisitionLine adds a line to a requisition. Quantities and costs are
+// decimal **strings** — no float in the fixtures either (I8).
+func (f *TenantFixture) NewRequisitionLine(t *testing.T, requisitionID, productID uuid.UUID, qty, estUnitCost string, lineNo int) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	f.Must(t, func(tx *gorm.DB) error {
+		return tx.Exec(`
+			INSERT INTO purchase_requisition_lines
+			  (id, tenant_id, requisition_id, product_id, qty, est_unit_cost, line_no)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			id, f.ID, requisitionID, productID, qty, estUnitCost, lineNo).Error
+	})
+	return id
+}
+
+// SetRequisitionStatus moves a requisition directly, for the arrange half of a
+// test about something else.
+//
+// As the owner: pr_terminal_immutable refuses an UPDATE to an approved,
+// rejected, or cancelled requisition, and these fixtures are *setting up* a
+// state rather than transitioning through it. Going through the API instead
+// would make every test that needs an approved requisition also depend on
+// approval working.
+func (f *TenantFixture) SetRequisitionStatus(t *testing.T, requisitionID uuid.UUID, status string) {
+	t.Helper()
+	mustExec(t, f.db.Owner, `
+		UPDATE purchase_requisitions
+		SET status = ?,
+		    submitted_at = COALESCE(submitted_at, now()),
+		    decided_by   = CASE WHEN ? IN ('approved','rejected') THEN ? ELSE decided_by END,
+		    decided_at   = CASE WHEN ? IN ('approved','rejected') THEN now() ELSE decided_at END,
+		    reject_reason = CASE WHEN ? = 'rejected' THEN 'not budgeted' ELSE reject_reason END
+		WHERE id = ?`,
+		status, status, f.User.ID, status, status, requisitionID)
+}
+
 // NewRequisition creates a requisition in the given status, filling whichever
 // conditional fields that status requires (§6.10.3).
 func (f *TenantFixture) NewRequisition(t *testing.T, status string) uuid.UUID {
@@ -371,6 +421,13 @@ func (f *TenantFixture) NewRequisition(t *testing.T, status string) uuid.UUID {
 // NewPurchaseOrder creates an `open` purchase order with no lines.
 func (f *TenantFixture) NewPurchaseOrder(t *testing.T) uuid.UUID {
 	t.Helper()
+	return f.NewPurchaseOrderFor(t, f.SupplierID)
+}
+
+// NewPurchaseOrderFor is NewPurchaseOrder against a named supplier, for the
+// tests where which supplier is on the order is the thing under test (G4).
+func (f *TenantFixture) NewPurchaseOrderFor(t *testing.T, supplierID uuid.UUID) uuid.UUID {
+	t.Helper()
 	id := uuid.New()
 	f.Must(t, func(tx *gorm.DB) error {
 		return tx.Exec(`
@@ -378,7 +435,7 @@ func (f *TenantFixture) NewPurchaseOrder(t *testing.T) uuid.UUID {
 			  (id, tenant_id, po_number, supplier_id, warehouse_id, created_by)
 			VALUES (?, ?, ?, ?, ?, ?)`,
 			id, f.ID, fmt.Sprintf("PO-202607-%04d", next()),
-			f.SupplierID, f.WarehouseID, f.User.ID).Error
+			supplierID, f.WarehouseID, f.User.ID).Error
 	})
 	return id
 }
