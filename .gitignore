@@ -1,0 +1,27 @@
+# --- credentials: these lines exist before the files they protect ------------
+secrets/
+*-service-account.json
+*.local
+.env
+.env.*
+!.env.example
+
+# --- go ----------------------------------------------------------------------
+/backend/bin/
+/backend/tmp/
+*.exe
+*.test
+*.out
+
+# --- node --------------------------------------------------------------------
+node_modules/
+/frontend/dist/
+/frontend/.vite/
+npm-debug.log*
+
+# --- editors / os ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
