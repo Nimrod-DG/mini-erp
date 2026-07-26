@@ -1,0 +1,18 @@
+# Never in an image. The Firebase service-account key is the whole point of this
+# file existing before the COPY that would otherwise include it.
+secrets/
+*firebase-adminsdk*
+*serviceAccountKey*.json
+.env
+.env.*
+
+# Build output and test artefacts.
+bin/
+tmp/
+*.exe
+*.test
+*.out
+coverage*.out
+
+Dockerfile
+.dockerignore

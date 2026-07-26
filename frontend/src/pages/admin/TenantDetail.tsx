@@ -129,7 +129,7 @@ export function TenantDetailPage() {
                         setTenantModule(id, module.code, event.target.checked),
                       )
                     }
-                    className="size-4"
+                    className="size-4 accent-accent"
                   />
                   <span className={module.enabled ? "" : "text-secondary"}>
                     {module.enabled ? "Enabled" : "Off"}

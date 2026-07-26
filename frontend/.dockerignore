@@ -1,0 +1,14 @@
+# node_modules is reinstalled from the lockfile inside the image; copying the host
+# copy in would be slow and, on a different platform, wrong.
+node_modules
+dist
+coverage
+
+# The real Firebase config. The image takes these as build args instead, so a
+# stray .env.local cannot decide what a CI build points at.
+.env
+.env.*
+!.env.example
+
+Dockerfile
+.dockerignore

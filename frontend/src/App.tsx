@@ -1,6 +1,7 @@
 import { Navigate, BrowserRouter, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 
+import { EntitlementWatcher } from "./components/EntitlementWatcher";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ToastProvider } from "./components/Toasts";
 import {
@@ -57,6 +58,9 @@ export default function App() {
       <ToastProvider>
         <BrowserRouter>
           <AuthProvider>
+            {/* Inside the router and the auth provider, because it navigates and
+                re-reads /api/me; renders nothing itself. */}
+            <EntitlementWatcher />
             <Routes>
               <Route path="/login" element={<LoginRoute />} />
               {/* Public and outside ProtectedRoute: someone resetting a password

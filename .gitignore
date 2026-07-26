@@ -23,6 +23,9 @@ node_modules/
 /frontend/dist/
 /frontend/.vite/
 npm-debug.log*
+# Vitest's coverage output. The Go side's coverage.out is already covered by
+# *.out above; this is the same artefact for the other application.
+/frontend/coverage/
 
 # --- editors / os ------------------------------------------------------------
 .DS_Store

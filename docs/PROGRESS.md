@@ -27,20 +27,23 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
-**Phase:** 7.5 — **DONE. THE MVP GATE IS CROSSED.** All twenty-five acceptance
-steps have now been walked in a browser at 360px in both themes, on the real
-seeded database. Phases 0–7 are complete and the MVP is finished.
+**Phase:** 8 — **all but one box done.** The MVP gate was crossed at Phase 7.5;
+this phase added the frontend suite, CI, the container images, and the coverage
+work §12.6 asks for. Everything runs green locally.
 
-The walk found **nine** things. One was a genuine, shipping-blocking bug that no
-test in the suite could have caught: **`Idempotency-Key` was missing from the CORS
-allow-list, so a goods receipt could not be posted from a browser at all.** §8.4 —
-the cross-module transaction this whole application exists to demonstrate — was
-unreachable from the UI while Groups D and H were green. See the Phase 7.5 log.
+| Phase 8 "done when" | State |
+|---|---|
+| FE1–FE26 green | **Done** — the twenty §12.5 assigns to this phase, as 102 Vitest tests. FE16–FE21 are Phase 11's, with the audit log |
+| CI green on a pull request | **Not verifiable here.** The workflow exists and every step was run by hand; `govulncheck` cannot be installed on this machine and the workflow itself needs a push |
+| Coverage meets §12.6 | **4 of 6 targets met.** `procurement` 80.6% and `internal/db` 88.5% are short, and 88% of what remains uncovered in them is `if err != nil` database plumbing — see the Phase 8 log for why chasing it needs fault injection and why that was declined |
 
-**Next action:** open [`phases/phase-8-frontend-tests.md`](phases/phase-8-frontend-tests.md)
-in a new session. Phase 8 is now open.
+Phase 7.5's deferred findings 6, 7 and 9 are all fixed. Finding 8 was confirmed
+deferred against §10.7.3's explicit list, not forgotten.
 
-### What was and was not verified this phase
+**Next action:** open a pull request and watch the workflow. That is the one
+remaining box, and it cannot be checked from this machine. Then Phase 9.
+
+### What was and was not verified at Phase 7.5
 
 **Verified mechanically, and green:** the whole Go suite (Groups A–L, including
 the new Group L), the frontend build and lint, and seed idempotency at the
@@ -1766,3 +1769,297 @@ give `refreshMe`, `ResponsiveList`, `useCompact` and `prefillLines` tests before
 anything else. FE1–FE26 run against MSW, which is a different class of bug from
 this walk: a mock encodes what you *believe* the server sends, which is exactly why
 neither it nor the Go suite could ever have caught the CORS bug.
+
+---
+
+## Phase 8 — 2026-07-26
+
+**Done:** the frontend has a test suite, both applications have a CI workflow and
+a container image, and the coverage question §12.6 asks is now answerable by a
+command rather than by a guess.
+
+**Tests green:** **FE1–FE15 and FE22–FE26** — all twenty §12.5 assigns to this
+phase — as **102 Vitest tests in 8 files**, plus the whole Go suite at **366
+tests** (54 of them new here). `npm run lint`, `npm run build`, `gofmt`, `go vet`
+and `golangci-lint run` are all clean.
+
+### The frontend suite
+
+`frontend/src/test/` — infrastructure in six files, assertions in eight.
+
+| File | What it is |
+|---|---|
+| `setup.ts` | jest-dom, the MSW lifecycle, and the two `vi.mock` calls that replace Firebase. `onUnhandledRequest: "error"` — an endpoint no handler answers fails by name instead of timing out five seconds later |
+| `firebaseFake.ts` | §12.4's rule applied to the browser half: `getAuth`, `onAuthStateChanged`, `signOut`, `signIn`. `setFirebaseUser(uid)` drives the **real** `AuthProvider`, so every test goes through the real `/api/me` round trip. It is a separate module because a `vi.mock` factory is hoisted above the imports and cannot close over anything beside it |
+| `media.ts` | `window.matchMedia`, which jsdom does not implement at all. A small real query engine, because `useCompact` and `useTheme` both ask it. **The lists are cached by query string on purpose:** both hooks call `matchMedia` more than once, and with fresh objects `removeEventListener` would never find the listener it was meant to remove |
+| `server.ts` | MSW handlers. Every endpoint answered with the emptiest legal §9.0 response, so a test states only what it cares about |
+| `fixtures.ts` | The seeded people of §15 — `rina` `budi` `sari` `dewi` `agus` `superadmin` — and row builders. `renderApp("/finance", agus)` says what it is checking |
+| `render.tsx` | `renderApp(path, me)` renders **`<App/>`**, pushing the path onto jsdom's history rather than swapping in a `MemoryRouter`. So the real router, the real guards and the real providers are all in the picture; a harness that had to be handed a router would be testing a different tree from the one that ships |
+| `layout.ts` | Measures the size a component *declares*, by reading its Tailwind utilities. **Read its comment before trusting FE9 or FE13** — see the honesty note below |
+
+| Group | Covers |
+|---|---|
+| `navigation.test.tsx` | FE1, FE8 |
+| `permissions.test.tsx` | FE2, FE6 |
+| `receipt.test.tsx` | FE3, FE4, FE5, FE9 |
+| `responsive.test.tsx` | FE7 |
+| `theme.test.tsx` | FE10, FE11 |
+| `presentation.test.tsx` | FE12, FE13, FE26 |
+| `lists.test.tsx` | FE14, FE15 |
+| `masterdata.test.tsx` | FE22–FE25 |
+
+**What FE9 and FE13 can and cannot claim.** jsdom has no layout engine and
+Tailwind is never compiled during a unit test, so neither measures a pixel a
+browser produced. They measure the minimum a control *declares*. That is weaker
+than "44px on a phone" and it is still the check that catches the regression:
+every one of the four targets the Phase 7 audit found was a control that had
+declared no minimum at all. The real pixels were checked at the 360px walk.
+
+### Three real findings, from the tests
+
+- **FE9 found two sub-44px targets on the goods receipt form** — the one screen
+  §10.7.1 calls genuinely mobile. "Back to the order" was a bare `text-sm` link at
+  about 20px, and the note textarea declared no minimum (it was tall enough by
+  accident, via `rows={2}`, so nothing stopped a later `rows={1}`). Both fixed.
+- **FE13 found every skeleton row 4px short.** The placeholder bar was `h-4`
+  against `text-sm`'s 1.25rem line box — a 20px lurch over five rows, which is the
+  exact thing §10.7.6 uses skeletons instead of a spinner to avoid. Now `h-5`.
+- **FE6 had no behaviour to test.** A `403 module_not_enabled` left the reader on a
+  screen of a module they no longer had, holding an inline error, with a sidebar
+  still offering the link that produced it. Reachable because `moduleRoles` comes
+  from one `/api/me` read at sign-in while the *server* is never stale (I9). Built:
+  `lib/api.ts` gained `onEntitlementRevoked`, and `components/EntitlementWatcher.tsx`
+  turns that refusal into the server's own sentence, a `refreshMe()`, and a
+  redirect. `insufficient_module_role` is deliberately **not** routed through it —
+  that means "right module, not senior enough for this one action", and the answer
+  to it is the inline refusal where the action was.
+
+### Phase 7.5's deferred findings
+
+| # | Resolution |
+|---|---|
+| 6 | **Fixed** — `whitespace-nowrap` on the reorder badge |
+| 7 | **Fixed** — `accent-accent` on all four checkboxes, so the control follows the theme token in both modes |
+| 9 | **Fixed** — the journal is now `ScrollableTable` + a frozen first column. **The Entry column had to move first**: only the first column can sensibly be frozen, and §10.0.2 says a document number is the identity rather than metadata anyway, so the reorder is right regardless. Test in `responsive.test.tsx` |
+| 8 | **Confirmed deferred, not forgotten.** §10.7.3 names the tab bar's destinations explicitly — "Dashboard, Requisitions, Orders, and Stock if entitled" — and Finance is not among them. Dewi reaches it from the drawer, which the section calls the whole map. Changing the spec's list is a design decision for whoever wants it, not a Phase 8 slip |
+
+### CI
+
+`.github/workflows/ci.yml`, three jobs, `TZ=UTC` at the top because Group J
+asserts the process agrees (J2 is literally `time.Local == time.UTC`).
+
+- **backend** — `go vet` → `golangci-lint` → `govulncheck` → `go test -race` with
+  coverage.
+- **frontend** — `npm ci` → lint → tests with coverage → build.
+- **containers** — both images, `needs: [backend, frontend]`. Building an image of
+  a failing commit tells nobody anything.
+
+**No deploy job**, per §12.7. Phase 9 deploys by hand, once.
+
+New files CI needs, which did not exist: **`backend/Dockerfile`** (distroless
+static, non-root, shipping `migrate` beside `api` — a release that cannot migrate
+itself needs a laptop), **`frontend/Dockerfile`** + **`nginx.conf`**, two
+`.dockerignore`s, and **`backend/.golangci.yml`**.
+
+**`nginx.conf`'s `try_files` line is the load-bearing one.** Every route in
+`App.tsx` is client-side, so `/procurement/orders/<uuid>/receive` is not a file —
+and the acceptance test pastes UUIDs into the address bar. `index.html` is also
+explicitly `no-store`: it is the one filename that does not change between
+releases, and a cached copy points at hashed assets that no longer exist, which is
+a white screen only a hard refresh fixes.
+
+**Verified locally:** `go vet`, `golangci-lint run` (0 issues), the Go suite, the
+frontend lint/test/build, and **both images built *and run*** — building an image
+is not evidence it starts:
+
+| Check | Result |
+|---|---|
+| web `/` | 200 |
+| web `/procurement/orders/<uuid>/receive` | 200, serves `index.html` — `try_files` works |
+| web `/assets/nope.js` | 404 — the SPA fallback is not swallowing everything |
+| api boot | `mini-erp api listening on :8080` |
+| `/api/health` | `{"status":"ok"}` |
+| `/api/me`, no token and a garbage token | 401 both, not 500 — the Admin SDK really initialised and was consulted |
+| CORS preflight incl. `Idempotency-Key` | 204 with the header — Phase 7.5's shipping bug stays fixed *in the container* |
+| `/migrate` in the same image | ran against the live database, idempotent: "schema already up to date" |
+
+One trap for whoever repeats this on Windows: Git Bash rewrote
+`-e GOOGLE_APPLICATION_CREDENTIALS=/secrets/key.json` into
+`C:/Program Files/Git/secrets/key.json`, and the container exited with a
+credentials error that looks like a code bug. Prefix the command with
+`MSYS_NO_PATHCONV=1`.
+
+**Not verified:** `govulncheck` — installing it needs `sum.golang.org`, which this
+machine cannot reach — and the workflow itself, which needs a push. Both are
+first-run risks on the pull request.
+
+**And `go test -race` has still never run anywhere.** No C toolchain here, and CI
+has never been pushed, so "CI runs it" describes the workflow file rather than
+anything that has happened. The locking and idempotency paths — `SELECT … FOR
+UPDATE`, the `SavePoint`/`RollbackTo` pair in `createGoodsReceipt` — are exactly
+where a race would live, so that first CI run is worth having green **before** the
+Phase 9 deploy rather than after it.
+
+`golangci-lint` found exactly one issue, `QF1001` on a `!(a < b)` in
+`identity/level_test.go`; rewritten as `>=`. `.golangci.yml` keeps the **default**
+linter set rather than widening it: every default linter reports a defect, and the
+first time a step reports a preference instead is the last time anybody reads it.
+
+### Coverage — 4 of 6 §12.6 targets met, and the two that are not
+
+`make cover` now prints this, via **`backend/cmd/covreport`**:
+
+```
+procurement (incl. receipt.go)     80.6%  ( 681/ 845)  target  90%  SHORT
+internal/db                        88.5%  (  85/  96)  target  90%  SHORT
+internal/middleware                91.2%  (  83/  91)  target  90%  OK
+inventory                          81.5%  ( 365/ 448)  target  80%  OK
+finance                            85.3%  (  58/  68)  target  80%  OK
+handlers and wiring                82.9%  ( 568/ 685)  target  60%  OK
+all of internal/ (not a target)    81.5%  (1980/2429)
+```
+
+Frontend `src/components`: **81.9% lines**, against §12.6's 60%. Enforced as a
+Vitest threshold on that directory, so it cannot quietly fall back.
+
+**`cmd/covreport` exists because both obvious ways to measure this are wrong.**
+Per-package coverage understates the suite badly — `internal/db` scores **42.7%**
+that way, while `internal/api`'s tests are in fact exercising most of it, because
+every request goes through `WithTenant`. The honest number needs
+`-coverpkg=./...`; but that makes every one of the seven test binaries write a
+full profile of the whole module, `go test` concatenates them, and `go tool cover`
+reading that file double-counts. The blocks have to be **unioned**. Re-deriving
+that twice in one session is why it is a checked-in tool.
+
+**Where the coverage went, and it was not busywork.** Seven functions were at
+**0.0%** — not error paths, whole endpoints:
+
+- `getWarehouse`, `patchWarehouse`, `restoreWarehouse`, `duplicateWarehouseCode` —
+  **three warehouse endpoints the frontend calls on every warehouse edit**, with no
+  test at all. §9.6.1's failure mode from the other direction: fully built and half
+  *tested*, which looks identical until something regresses.
+- `getTenant`, `listTenantModules` — the workspace detail screen and its
+  entitlement matrix, reachable in the browser since Phase 3.
+- **`api.PostGoodsReceipt`** — §8.4 with the HTTP peeled off, the function
+  `cmd/seed` calls. The one seam §15 leans on ("the seed cannot drift from the
+  application") was itself never asserted; a wrong argument order there would have
+  surfaced as `make seed` failing at the demo.
+
+54 new Go tests in six files: `inventory_master_test.go`, `seed_seam_test.go`,
+`admin_tenant_reads_test.go`, `malformed_input_test.go`,
+`procurement_edits_test.go`, `db/migrate_test.go`. The two most useful are not
+about a percentage:
+
+- **A migration that fails is not recorded.** Recorded-but-not-applied is the worst
+  state a migration runner can reach: every later run skips the file and the schema
+  is permanently behind what the table claims.
+- **Garbage in, 4xx out.** 21 routes, table-driven: a non-UUID path parameter is a
+  **404**, and a bad query parameter is a **400 naming the parameter**. A `uuid`
+  parse error escaping as a 500 is the difference between "you asked for something
+  that cannot exist" and "this server is broken" — it pages somebody, spends error
+  budget, and tells a prober they found something.
+
+**Deviations from spec:** four, all recorded rather than worked around.
+
+- **FE24 is asserted as a guarantee, not as optimistic UI.** §12.5 words it
+  "optimistically removes the row and restores it if the request fails". This
+  application deletes pessimistically. The reason is that a **refused** delete is
+  the ordinary case here, not the edge one: a warehouse holding stock is refused
+  with `in_use` (G5) and so is a supplier with open orders (G4), the seeded demo
+  has both, and the acceptance test walks them. Optimistic removal would make the
+  common outcome a row that vanishes and comes back — which reads as a bug — to
+  hide about 200ms in the uncommon one. What FE24 exists to guarantee is asserted:
+  a successful delete removes the row, a refused one leaves it exactly where it was
+  with the reason on screen.
+- **FE10 is a three-state radiogroup, not a cycling button.** §12.5 says "cycles
+  light → dark → system"; §10.8.3 says "offer light / dark / system, defaulting to
+  system". What is built offers all three in one press each, and the substance of
+  FE10 — three states, the applied class, the persistence — is asserted.
+- **FE23's "submits only changed fields" was implemented, not reworded.** The
+  product edit form sent all five every time, which quietly widens a lost update:
+  two admins with the screen open, one renames the product, the other fixes the
+  cost and sends the name they loaded a minute ago over the top of it. It now
+  diffs, and says "Nothing to save" rather than a "Changes saved" for a request it
+  never sent.
+- **§12.6's package targets name packages that do not exist.** There is no
+  `internal/procurement`, `internal/inventory` or `internal/finance` — all three
+  live as files inside `internal/api`. `cmd/covreport` maps the spec's intent onto
+  the files that exist, and that mapping is the reason it is checked in.
+
+**TODO(post-mvp) markers added:** none. The standing list is still exactly two:
+
+- `backend/internal/api/procurement_receipts.go` — audit `gr.posted` (§8.4 step 7).
+- `frontend/src/lib/requisitionForm.ts` — replace the product `<select>` with a
+  search-as-you-type picker.
+
+**Known broken / left half-done:**
+
+- **The two SHORT coverage targets will not close without fault injection, and that
+  is the honest reason rather than an excuse.** Of procurement's 164 remaining
+  uncovered statements, **144 (88%) are `if err != nil` guards on database calls**;
+  of `internal/db`'s 11, **9 are**. Reaching 90% on procurement means covering
+  ~80 of those, which needs a harness that makes the Nth query fail. §12.6 says
+  outright that "coverage percentage is a weak signal on its own", and building a
+  query-failure injector to exercise `return err` lines is testing for the metric
+  rather than the behaviour. **Every reachable branch that was uncovered now is
+  covered** — that was the 54 tests. If a later phase wants the number, the tool to
+  build is a GORM plugin that fails a chosen query, and the honest thing is to
+  decide that on purpose.
+- **`internal/auth/firebase.go` is 0% and should stay there.** §12.4: "Do not test
+  Firebase itself." It is the SDK wrapper the fake replaces.
+- **`govulncheck` is unverified locally** (no route to `sum.golang.org`), and the
+  workflow has never run. Both could fail on the first pull request.
+- **`components/PasswordField.tsx` is 0%.** The login screen is not in FE1–FE26;
+  Phase 2 walked it by hand and Phase 7.5 re-walked it.
+- **`npm audit` reports 2 high advisories**, both `react-router` GHSA-qwww-vcr4-c8h2
+  — an **RSC-mode** CSRF bypass. This is a plain SPA with `BrowserRouter` and no RSC
+  anywhere, so it does not apply; the fix is a major version bump and was not worth
+  churning the router for in this phase. Revisit at Phase 9.
+- **`vitest` was pinned at `^3` first and had to be `^4`.** Vitest 3 bundles its
+  own Vite 7, whose plugin types are incompatible with the project's Vite 8, and
+  `tsc -b` fails on `vite.config.ts` with a 40-line type error that says nothing
+  about the cause. Vitest 4 peers on Vite 8. Worth knowing before the next upgrade.
+- `go test -race` still cannot run here — no C toolchain on `PATH`. CI runs it.
+- **The local database is still the walked-on demo**, not a pristine one. Rebuild
+  before demoing: `docker compose down -v && make up && make migrate && make seed`.
+
+**Next:** push and get the workflow green — that is the one remaining box in
+`phases/phase-8-frontend-tests.md`, and it cannot be checked from this machine.
+`govulncheck` and the two container builds are the likely first failures. Get it
+green **before** the deploy, not after: `go test -race` has never run anywhere, and
+the only real concurrency in the system is the goods receipt's `FOR UPDATE` and
+its savepoint/rollback idempotency pair.
+
+### What Phase 9 inherits, and the shape the developer intends
+
+**Decided by the developer 2026-07-26, before Phase 9 opened:** the **frontend goes
+to Firebase Hosting** (`npm run build`, then `firebase deploy --only hosting`), and
+the **backend plus the database go to GCP**. The hosting site already exists —
+`erp-project-b66ce`, auto-linked at app registration and unused since.
+
+Four things follow from that choice, and the first is easy to miss:
+
+- **`frontend/nginx.conf` is then not on the serving path.** It was written for the
+  container image, and Firebase Hosting needs the same rule expressed its own way:
+  a `firebase.json` **rewrite of `**` to `/index.html`**, or every deep link and
+  every reload 404s. The container image stays useful as a
+  build-anywhere/run-anywhere artefact and as the thing CI proves still assembles,
+  but the SPA fallback has to be stated twice, in two syntaxes, and both have to be
+  checked. There is no test behind either.
+- **The order of operations is forced.** `VITE_API_BASE_URL` is baked in at build
+  time, so the backend must be deployed first, its URL read off, and only then can
+  the frontend be built and shipped. A frontend built before the backend exists
+  points at `localhost:8080`.
+- **`CORS_ORIGINS` must name the Hosting origin**, and the API refuses anything
+  else. This is the pair that Phase 7.5's shipping bug lived in; the allow-list
+  already carries `Idempotency-Key`, and the container run above confirms it.
+- **The password reset action URL** (Console → Authentication → Templates →
+  Password reset → Customize action URL) must point at `<hosting origin>/auth/action`.
+  It still points at Firebase's hosted page — known since Phase 2, and the reason
+  `ResetPassword` has never been reached by a real emailed link.
+
+And the two questions this phase wrote down and did not answer: **I3's wording
+versus `erp_migrate`'s `SUPERUSER`** — on a managed instance that role is
+provisioned by hand, so the deploy is the moment to either narrow I3 or test the
+migration role too — and the `react-router` **RSC-mode** advisory, which does not
+apply to this SPA but will keep showing up in `npm audit`.

@@ -5,7 +5,9 @@ import { AppShell } from "../../components/AppShell";
 import {
   EmptyState,
   ErrorNotice,
+  frozenCell,
   Pagination,
+  ScrollableTable,
   SkeletonRows,
   SourceFilterNotice,
   TableHead,
@@ -140,12 +142,25 @@ export function FinancePage() {
         <ErrorNotice error={state.error} onRetry={reload} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+          {/* Phase 7.5's finding 9. This is the widest table in the application at
+              `min-w-[52rem]`, so at 360px the Amount column is well off-screen —
+              and scrolling to it used to take the entry number with it, leaving a
+              column of money belonging to nothing. `frozenCell` had gone to the
+              stock grid and the ledger and not here.
+
+              The Entry column also had to become the *first* one for that to work:
+              only the first column can sensibly be frozen, and a timestamp is the
+              wrong thing to pin anyway. §10.0.2 — "document numbers are identity,
+              not metadata; treat it as the primary label rather than hiding it as
+              grey small print" — says the reorder is the right way round
+              regardless of the scrolling. */}
+          <ScrollableTable>
             <table className="w-full min-w-[52rem] text-left text-sm">
               <TableHead
+                sticky
                 columns={[
+                  { label: "Entry", sticky: true },
                   { label: "Posted" },
-                  { label: "Entry" },
                   { label: "Posting" },
                   { label: "Source" },
                   { label: "Amount", align: "right" },
@@ -166,20 +181,23 @@ export function FinancePage() {
               {state.status === "ready" && state.data.data.length > 0 && (
                 <tbody>
                   {state.data.data.map((entry) => (
+                    // `group` so the frozen cell follows the row's hover; without
+                    // it the pinned column stays surface-coloured while the rest
+                    // of the row lifts.
                     <tr
                       key={entry.id}
-                      className="border-t border-hairline align-top hover:bg-raised"
+                      className="group border-t border-hairline align-top hover:bg-raised"
                     >
-                      <td className="px-3 py-3 text-secondary">
-                        {formatDateTime(entry.postedAt, timezone)}
-                      </td>
-                      <td className="px-3 py-3">
+                      <td className={`px-3 py-3 ${frozenCell}`}>
                         <span className="tabular font-medium">
                           {entry.entryNumber}
                         </span>
                         <div className="text-xs text-secondary">
                           {entry.description}
                         </div>
+                      </td>
+                      <td className="px-3 py-3 text-secondary">
+                        {formatDateTime(entry.postedAt, timezone)}
                       </td>
                       {/* The double entry, written the way a journal is read:
                           the debit side above the credit side, each naming its
@@ -235,7 +253,7 @@ export function FinancePage() {
                 </tbody>
               )}
             </table>
-          </div>
+          </ScrollableTable>
 
           {state.status === "ready" && (
             <Pagination

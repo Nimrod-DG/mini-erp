@@ -121,7 +121,7 @@ export function MasterDataList<T extends { id: string }>({
                 setShowDeleted(event.target.checked);
                 setPage(1);
               }}
-              className="size-4"
+              className="size-4 accent-accent"
             />
             Show deleted
           </label>

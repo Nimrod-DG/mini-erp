@@ -1,0 +1,135 @@
+name: CI
+
+# §12.7: on push and pull request. Both, deliberately — a green pull request that
+# goes red on merge is a signal nobody sees.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A second push to the same branch cancels the first. The suite starts a
+# PostgreSQL container per package, and two runs of that racing each other is how
+# Phase 2 saw a whole package fail at 0.00s because a container never came up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # I7: all timestamps are TIMESTAMPTZ stored UTC, and Group J asserts that the
+  # API process agrees — J2 is literally `time.Local == time.UTC`. A runner in
+  # any other zone would fail it, so the zone is stated rather than inherited.
+  TZ: UTC
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+
+      # v8 of the action, because the config in backend/.golangci.yml is schema
+      # version 2 and only golangci-lint v2 reads it. v6 installs v1 and would
+      # fail on the `version:` key itself.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          working-directory: backend
+
+      - name: govulncheck
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      # testcontainers needs Docker, which ubuntu-latest has. `-p 1` runs one
+      # package at a time: each package that touches the database starts its own
+      # container, and three of them coming up at once is the load that made the
+      # local suite flaky.
+      - name: go test
+        working-directory: backend
+        run: go test ./... -p 1 -race -coverprofile=coverage.out -covermode=atomic
+
+      - name: coverage by package
+        working-directory: backend
+        run: go tool cover -func=coverage.out | tail -1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.out
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+
+      - name: lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: test
+        working-directory: frontend
+        run: npm run test -- --coverage
+
+      # `tsc -b` then `vite build`. The typecheck covers the test files too, since
+      # they live under `src` — a test that no longer compiles is a broken test.
+      - name: build
+        working-directory: frontend
+        run: npm run build
+
+  containers:
+    name: containers
+    runs-on: ubuntu-latest
+    # Only once the code they would contain is known good. Building an image of a
+    # failing commit tells nobody anything.
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          load: true
+          tags: mini-erp-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: false
+          load: true
+          tags: mini-erp-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+# THERE IS DELIBERATELY NO DEPLOY JOB. §12.7: "Do not deploy from CI for this
+# project; deploy manually. Automated deploy adds setup cost with no portfolio
+# value." Phase 9 does the deploy by hand, once.

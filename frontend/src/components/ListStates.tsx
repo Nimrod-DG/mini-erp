@@ -21,8 +21,15 @@ export function SkeletonRows({
         <tr key={row} className="border-t border-hairline">
           {Array.from({ length: cols }, (_, col) => (
             <td key={col} className="px-3 py-3">
+              {/* h-5, not h-4: `text-sm` carries a 1.25rem line box, so a 20px
+                  bar is exactly the height of the single line of text it stands
+                  in for, and the row does not change height when the data
+                  arrives. It was h-4, which left every skeleton row 4px short —
+                  a 20px lurch over five of them, which is the specific thing
+                  §10.7.6 uses skeletons instead of a spinner to avoid. FE13 is
+                  what measures it. */}
               <div
-                className="h-4 animate-pulse rounded bg-raised"
+                className="h-5 animate-pulse rounded bg-raised"
                 style={{ width: col === 0 ? "60%" : "40%" }}
               />
             </td>

@@ -16,6 +16,7 @@ import {
   restoreProduct,
   type LedgerEntry,
   type ProductDetail as Detail,
+  type ProductWrite,
 } from "../../lib/api";
 import {
   formatDateTime,
@@ -214,17 +215,34 @@ function EditForm({
         className="mt-4 space-y-4"
         onSubmit={(event) => {
           event.preventDefault();
-          void run(
-            () =>
-              patchProduct(product.id, {
-                sku: sku.trim(),
-                name: name.trim(),
-                uom: uom.trim(),
-                reorderPoint: reorderPoint.trim(),
-                standardCost: standardCost.trim(),
-              }),
-            "Changes saved.",
-          );
+
+          // Only what actually changed (FE23).
+          //
+          // PATCH treats an absent field as "leave it alone", so sending all five
+          // every time works — and quietly widens a lost update: two admins with
+          // the screen open, one renames the product, the other fixes the cost and
+          // sends the name they loaded a minute ago over the top of it. A field
+          // nobody touched should not be in the request at all.
+          const changed: ProductWrite = {};
+          if (sku.trim() !== product.sku) changed.sku = sku.trim();
+          if (name.trim() !== product.name) changed.name = name.trim();
+          if (uom.trim() !== product.uom) changed.uom = uom.trim();
+          if (reorderPoint.trim() !== String(product.reorderPoint)) {
+            changed.reorderPoint = reorderPoint.trim();
+          }
+          if (standardCost.trim() !== String(product.standardCost)) {
+            changed.standardCost = standardCost.trim();
+          }
+
+          if (Object.keys(changed).length === 0) {
+            // Saying "Changes saved" for a request that was never sent is the
+            // same lie as saying nothing at all, which is what this screen used
+            // to do before the toast existed.
+            toast.success("Nothing to save — no field was changed.");
+            return;
+          }
+
+          void run(() => patchProduct(product.id, changed), "Changes saved.");
         }}
       >
         <div className="grid gap-4 sm:grid-cols-2">

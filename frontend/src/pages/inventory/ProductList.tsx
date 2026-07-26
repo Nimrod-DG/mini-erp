@@ -82,7 +82,7 @@ export function ProductList() {
                 setShowDeleted(event.target.checked);
                 setPage(1);
               }}
-              className="size-4"
+              className="size-4 accent-accent"
             />
             Show deleted
           </label>
@@ -175,7 +175,10 @@ function ProductRow({ product }: { product: Product }) {
         <span className="text-xs text-secondary">{product.uom}</span>
         {product.belowReorderPoint && (
           <div>
-            <span className="rounded border border-warning/40 px-1.5 py-0.5 text-xs text-warning">
+            {/* whitespace-nowrap: at 360px the three words wrapped to two lines
+                inside the badge's border, which read as two badges. Phase 7.5's
+                finding 6. */}
+            <span className="whitespace-nowrap rounded border border-warning/40 px-1.5 py-0.5 text-xs text-warning">
               below reorder point
             </span>
           </div>

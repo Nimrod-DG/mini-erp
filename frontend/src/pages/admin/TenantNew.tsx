@@ -186,7 +186,7 @@ export function TenantNew() {
                         : current.filter((code) => code !== module.code),
                     );
                   }}
-                  className="mt-1 size-4"
+                  className="mt-1 size-4 accent-accent"
                 />
                 <span>
                   <span className="block text-sm">{module.name}</span>

@@ -186,7 +186,10 @@ function ReceiveForm({
       actions={
         <Link
           to={`/procurement/orders/${po.id}`}
-          className="text-sm text-secondary"
+          // A text link is still a touch target (§10.7.5). It was `text-sm
+          // text-secondary` — about 20px tall, on the one screen §10.7.1 calls
+          // genuinely mobile. FE9 is what found it.
+          className="inline-flex min-h-11 items-center text-sm text-secondary"
         >
           Back to the order
         </Link>
@@ -229,7 +232,11 @@ function ReceiveForm({
               onChange={(event) => onNote(event.target.value)}
               rows={2}
               placeholder="Delivered by supplier truck, 2 boxes"
-              className="w-full rounded-md border border-hairline bg-surface px-3 py-2 text-sm"
+              // `rows={2}` already makes this taller than 44px, but incidentally:
+              // the floor was nowhere in the source, so nothing stopped a later
+              // `rows={1}`. Declared, it is checkable — which is the whole
+              // difference FE9 tests for.
+              className="min-h-11 w-full rounded-md border border-hairline bg-surface px-3 py-2 text-sm"
             />
           </label>
         </div>

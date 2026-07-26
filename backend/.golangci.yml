@@ -1,0 +1,30 @@
+# golangci-lint, pinned.
+#
+# `version: "2"` is the config-schema version, not the tool's. It is here so that a
+# future golangci-lint reading this file knows which schema it is looking at rather
+# than guessing — and so that CI, which installs `latest`, cannot silently change
+# the linter set under a commit that did not touch this file.
+#
+# The default linter set is deliberately kept rather than widened. It is errcheck,
+# govet, ineffassign, staticcheck and unused, and every one of those reports a
+# defect. A linter that reports a preference produces a diff nobody reads, and the
+# first time that happens the whole step stops being believed.
+version: "2"
+
+linters:
+  default: standard
+
+  exclusions:
+    rules:
+      # Every `_ = tx.Rollback()` and `_ = resp.Body.Close()` in this codebase is
+      # written with the underscore on purpose: the deferred close of a
+      # transaction that has already been committed returns an error there is
+      # nothing useful to do with. Assigning to `_` is the idiom for saying so,
+      # and errcheck's default already respects it — this rule covers the tests,
+      # where a closed body genuinely does not matter.
+      - path: _test\.go
+        linters: [errcheck]
+
+formatters:
+  enable:
+    - gofmt

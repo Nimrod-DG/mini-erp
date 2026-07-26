@@ -116,7 +116,7 @@ func TestRoleLevelOrderingAndNames(t *testing.T) {
 	// Ranked, so every permission check is a comparison (§5.3).
 	ranked := []RoleLevel{RoleNone, RoleViewer, RoleUser, RoleApprover, RoleAdmin}
 	for i := 1; i < len(ranked); i++ {
-		if !(ranked[i-1] < ranked[i]) {
+		if ranked[i-1] >= ranked[i] {
 			t.Fatalf("%v is not ranked below %v", ranked[i-1], ranked[i])
 		}
 	}

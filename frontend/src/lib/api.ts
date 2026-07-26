@@ -50,6 +50,35 @@ export class ApiError extends Error {
 type ErrorEnvelope = { error?: string; message?: string };
 
 /**
+ * The entitlement-went-away channel (FE6).
+ *
+ * WHY THIS EXISTS. Authorization is resolved from the database on every request
+ * (I9), so the *server* is never stale — but the navigation and every cosmetic
+ * guard are built from one `/api/me` read taken at sign-in. Disable Finance for a
+ * workspace while somebody is reading `/finance` and `RequireModule` in the
+ * browser still says yes, because `me.moduleRoles` is a minute old. The next
+ * request comes back `403 module_not_enabled`, and without this the reader is left
+ * on a screen of a module they no longer have, holding an inline error, with a
+ * sidebar still offering the link that produced it.
+ *
+ * `insufficient_module_role` is deliberately NOT routed here. That refusal means
+ * you are in the right module and not senior enough for one action, and the answer
+ * to it is the inline refusal where the action was — not being thrown off the
+ * screen.
+ *
+ * A Set rather than a single slot: StrictMode mounts the subscriber twice, and a
+ * single slot would be left holding whichever effect happened to clean up last.
+ */
+type EntitlementListener = (error: ApiError) => void;
+
+const entitlementListeners = new Set<EntitlementListener>();
+
+export function onEntitlementRevoked(listener: EntitlementListener): () => void {
+  entitlementListeners.add(listener);
+  return () => entitlementListeners.delete(listener);
+}
+
+/**
  * The single way this app talks to the backend. Every call carries the Firebase
  * ID token.
  *
@@ -81,11 +110,18 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const envelope = (body ?? {}) as ErrorEnvelope;
-    throw new ApiError(
+    const error = new ApiError(
       response.status,
       envelope.error ?? "unknown",
       envelope.message ?? response.statusText,
     );
+    // Announced before it is thrown, so the caller's own `.catch` still runs and
+    // still gets to say what it was doing. The listener handles the part no
+    // individual call site can: the screen is now the wrong screen.
+    if (error.status === 403 && error.code === "module_not_enabled") {
+      for (const listener of [...entitlementListeners]) listener(error);
+    }
+    throw error;
   }
   return body as T;
 }
