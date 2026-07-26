@@ -12,8 +12,10 @@ is walked, and what it finds is written down.
 
 1. [`../acceptance-test.md`](../acceptance-test.md) — the twenty-five steps, in
    full. This document is how to walk them, not a replacement for them.
-2. [`../PROGRESS.md`](../PROGRESS.md) — *Current state* only, for the seeded
-   accounts and what is in the demo.
+2. [`../PROGRESS.md`](../PROGRESS.md) — *Current state* only, and only if you
+   want the detail of what is in the demo. **This document is otherwise
+   self-contained**: the accounts, the setup, and the expected numbers are all
+   below.
 
 Do not load the reference docs. If a screen looks wrong, the question is whether
 it looks wrong, not what the specification said — and the answer to that goes in
@@ -51,13 +53,34 @@ touch targets were under 44px. Both were invisible to the Go suite.
 
 ## Before you start
 
+### 1. Stop anything already running — this one bites
+
+**An API server started before Phase 7 does not have `/api/dashboard/summary`,
+and it still serves the old `/api/me`.** Walking against it means the dashboard
+404s and every tenant admin appears to have no navigation — the exact bug Phase 7
+fixed, back again, because the process predates the fix.
+
+`Ctrl-C` the terminal running `make dev`. If nothing is obviously running but the
+port is held — `make dev` reporting *"Only one usage of each socket address"* is
+the symptom — find and kill it:
+
 ```bash
-docker compose down -v && make up && make migrate && make seed && make dev
+netstat -ano | grep ":8080" | grep LISTENING     # last column is the PID
+taskkill //F //PID <pid>
 ```
 
-The `down -v` is worth it: it guarantees a pristine demo. It also removes three
-scratch accounts left over from Phases 2–3, one of which is the developer's own
-Google account. To put that one back afterwards:
+Same for `:5173` if the Vite server is stuck.
+
+### 2. Rebuild the database
+
+```bash
+docker compose down -v && make up && make migrate && make seed
+```
+
+`down -v` guarantees a pristine demo. It also drops three scratch accounts left
+over from Phases 2–3, one of which is the developer's own Google account
+(`dgjy2019@gmail.com`). To put that back afterwards — the Firebase account itself
+survives, only the row goes:
 
 ```sql
 INSERT INTO users (id, tenant_id, firebase_uid, email, full_name, tenant_role)
@@ -66,19 +89,53 @@ SELECT gen_random_uuid(), t.id, '<the Firebase UID>', 'dgjy2019@gmail.com',
 FROM tenants t WHERE t.slug = 'nusantara';
 ```
 
-If you would rather keep it, skip `down -v` and run `make seed` alone — but note
-that Nusantara then has three tenant admins, and **step 12's `last_admin` will
-not fire**, because Rina is not the last admin. That is correct behaviour, not a
-bug; it was confirmed by temporarily demoting the other two.
+To keep it instead, skip `down -v` and run `make seed` alone — but then Nusantara
+has three tenant admins and **step 12's `last_admin` will not fire**, because
+Rina is not the last admin. That is correct behaviour, not a bug; it was
+confirmed by temporarily demoting the other two.
 
-**Restart any API server started before Phase 7** — an old process has no
-`/api/dashboard/summary` and the old `/api/me`.
+### 3. Start
 
-Set the browser to **360px** (devtools → responsive → 360×800) and leave it
-there. Password for every account is `password123`.
+```bash
+make dev          # api :8080, web :5173
+```
+
+**Do not try to probe whether the running server is current.** There is no cheap
+way: the auth chain is group middleware on `/api`, so it answers `401` before the
+router is reached and `GET /api/anything-at-all` returns `401` whether the route
+exists or not. Phase 5 measured this and recorded it in *Decisions taken* — the
+"401 rather than 404 means the route is wired" check does not prove that.
+
+So the only reliable move is step 1: kill it and start it again. If you skip that
+and the old binary is still up, the symptom is the dashboard failing to load and
+every tenant admin appearing to have no navigation.
+
+### 4. The browser
+
+Set it to **360px** — devtools → responsive → 360×800 — and leave it there for
+the whole walk.
 
 **Do not walk it twice for the two themes.** Do the functional pass once in dark,
 then Part C is a look-only pass in light.
+
+### The accounts
+
+Password for all of them is `password123`. `backend/cmd/seed/data.go` is the
+source of truth if this ever disagrees.
+
+| Email | Workspace | Tenant role | Procurement | Inventory | Finance |
+|---|---|---|---|---|---|
+| `super@erp.test` | *platform* | superadmin | — | — | — |
+| `rina@nusantara.test` | Nusantara Retail | admin | *implicit* admin | *implicit* admin | *implicit* admin |
+| `budi@nusantara.test` | Nusantara Retail | staff | approver | viewer | none |
+| `sari@nusantara.test` | Nusantara Retail | staff | user | user | none |
+| `dewi@nusantara.test` | Nusantara Retail | staff | viewer | none | admin |
+| `agus@bahari.test` | Bahari Logistics | admin | *implicit* admin | *implicit* admin | **none — not entitled** |
+| `manager@bahari.test` | Bahari Logistics | staff | approver | approver | none |
+| `staff@bahari.test` | Bahari Logistics | staff | user | viewer | none |
+
+Nusantara is `Asia/Jakarta` with all three modules; Bahari is `Asia/Makassar`
+with **no Finance**.
 
 ---
 
