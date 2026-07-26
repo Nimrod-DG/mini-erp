@@ -13,6 +13,8 @@ Filled in as they are established, so a later session does not go hunting.
 |---|---|
 | Firebase **dev** project ID | `erp-project-b66ce` (display name "erp project", Spark plan) |
 | Firebase dev web app | `erp-mini` — appId `1:889259985673:web:1bd9b28a7769be3142e1d8` |
+| Firebase dev service account | `backend/secrets/erp-project-b66ce-firebase-adminsdk-fbsvc-47d25660f5.json` (gitignored, never committed) |
+| Sign-in provider | Email/Password, enabled and the only one — confirmed 2026-07-26 |
 | Firebase **prod** project ID | *not created — Phase 9* |
 | Hosting site | `erp-project-b66ce`, auto-linked at app registration, unused until Phase 9 |
 | Database host | local Docker (Phase 0–8); host chosen at Phase 9 |
@@ -91,12 +93,6 @@ exists.
 **TODO(post-mvp) markers added:** none.
 
 **Known broken / left half-done:**
-- **No Firebase service account key on disk.** `backend/.env` points at
-  `./secrets/erp-project-b66ce-service-account.json`, which has not been
-  downloaded — it needs a human in the console (Project settings → Service
-  accounts → Generate new private key). Nothing in Phase 0 reads it, but
-  **Phase 2 cannot start without it.** Also confirm Email/Password is enabled
-  as the only sign-in provider.
 - `make migrate` and `make seed` reference `backend/cmd/migrate` and
   `backend/cmd/seed`, which arrive in Phase 1. The targets fail until then, by
   design.

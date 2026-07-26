@@ -1,6 +1,11 @@
 # --- credentials: these lines exist before the files they protect ------------
 secrets/
 *-service-account.json
+# Firebase names the downloaded key <project>-firebase-adminsdk-<hash>.json,
+# which the pattern above does not match. It lands in your Downloads folder and
+# gets dragged to the repo root, so match it by shape wherever it appears.
+*firebase-adminsdk*
+*serviceAccountKey*.json
 *.local
 .env
 .env.*
