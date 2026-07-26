@@ -47,5 +47,3 @@ A handler that touches tenant data outside that helper is a bug.
 `erp_app`, never as the schema owner — an owner bypasses RLS policies, so
 developing as one means building the whole system without ever exercising
 isolation, and finding out at deploy time that it never worked.
-
-The remaining invariants are in [`CLAUDE.md`](CLAUDE.md).
