@@ -52,6 +52,7 @@ import (
 	"github.com/DGosal/mini-erp/backend/internal/docnum"
 	"github.com/DGosal/mini-erp/backend/internal/httpx"
 	"github.com/DGosal/mini-erp/backend/internal/identity"
+	"github.com/DGosal/mini-erp/backend/internal/middleware"
 )
 
 // receiptKeyConstraint is the UNIQUE (tenant_id, idempotency_key) on
@@ -800,7 +801,7 @@ func readReceiptResult(tx *gorm.DB, grID uuid.UUID) (*receiptResult, error) {
 // Nothing is generated server-side — a key the server invents is a new key on
 // every retry, which is exactly the failure it exists to prevent.
 func idempotencyKey(c *fiber.Ctx) (string, error) {
-	raw := trimmed(c.Get("Idempotency-Key"))
+	raw := trimmed(c.Get(middleware.HeaderIdempotencyKey))
 	if raw == "" {
 		return "", fmt.Errorf("an Idempotency-Key header is required: generate a UUID " +
 			"when the form opens and send the same one on every retry")

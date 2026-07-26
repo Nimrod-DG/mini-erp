@@ -58,8 +58,13 @@ func New(deps Deps) *fiber.App {
 		app.Use(logger.New())
 	}
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:  strings.Join(deps.CORSOrigins, ","),
-		AllowHeaders:  "Origin, Content-Type, Accept, Authorization, " + middleware.HeaderRequestID,
+		AllowOrigins: strings.Join(deps.CORSOrigins, ","),
+		// Every header the browser is allowed to send. A header missing here is
+		// not a 4xx — the preflight succeeds and the browser then declines to
+		// send the real request, so the endpoint looks silently dead. Add a
+		// header to this list whenever a request starts sending one.
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, " +
+			middleware.HeaderRequestID + ", " + middleware.HeaderIdempotencyKey,
 		AllowMethods:  "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 		ExposeHeaders: middleware.HeaderRequestID,
 	}))
