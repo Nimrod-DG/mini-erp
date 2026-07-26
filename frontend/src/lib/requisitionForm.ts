@@ -26,6 +26,39 @@ export type DraftLine = { productId: string; qty: string; estUnitCost: string };
 
 export const emptyLine: DraftLine = { productId: "", qty: "1", estUnitCost: "" };
 
+/**
+ * The lines a `?products=` link asks the create form to start with — the
+ * low-stock widget's "Create requisition" shortcut (§10.2).
+ *
+ * The format is `<productId>[:<qty>]`, comma-separated. Quantity is carried in
+ * the URL rather than looked up here for three reasons: the link stays a link
+ * (copyable, bookmarkable, reloadable, no second request), the number is the
+ * shortfall PostgreSQL computed rather than one this file works out, and the
+ * page does not need Inventory access to render a Procurement form.
+ *
+ * Nothing is decided by these values. They are what the boxes are pre-filled
+ * with; the user edits them and the server validates whatever is finally sent
+ * (I12). So a malformed segment falls back to a quantity of one rather than
+ * refusing — a bad URL should not be able to produce a blank screen — and an id
+ * that names nothing simply renders as a line whose product picker is unset.
+ */
+export function prefillLines(param: string | null): DraftLine[] {
+  if (param === null) return [];
+
+  const lines: DraftLine[] = [];
+  for (const segment of param.split(",")) {
+    const [productId, qty] = segment.split(":");
+    const id = productId.trim();
+    if (id === "") continue;
+    lines.push({
+      productId: id,
+      qty: qty?.trim() || "1",
+      estUnitCost: "",
+    });
+  }
+  return lines;
+}
+
 export type RequisitionFormValues = {
   warehouseId: string;
   supplierId: string;

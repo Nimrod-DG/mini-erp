@@ -27,7 +27,10 @@ export function ThemeToggle() {
             aria-checked={selected}
             onClick={() => setPreference(option.value)}
             className={
-              "rounded px-3 py-1 text-sm transition-colors " +
+              // min-h-10 inside a p-0.5 border makes the control 44px overall,
+              // which is §10.7.5's floor. It was px-3 py-1 — about 26px, and one
+              // of four things the Phase 7 touch-target audit found.
+              "inline-flex min-h-10 items-center rounded px-3 text-sm transition-colors " +
               (selected
                 ? "bg-accent text-canvas"
                 : "text-secondary hover:text-primary")

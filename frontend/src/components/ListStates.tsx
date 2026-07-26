@@ -44,7 +44,53 @@ export type Column = {
   /** An actions column has no visible heading, but a table still needs one —
    *  a screen reader announcing "column 6" is not a heading. */
   hidden?: boolean;
+  /** Freeze this column while the table scrolls sideways (§10.7.4). Only the
+   *  first column of a table may sensibly carry it, and only the two dense
+   *  grids do: a stock or ledger row whose product has scrolled out of sight is
+   *  a row of numbers about nothing. Pair it with `frozenCell` on the matching
+   *  `<td>`. */
+  sticky?: boolean;
 };
+
+/**
+ * The classes a frozen first column needs, on the `<td>` side.
+ *
+ * Two things are load-bearing and neither is obvious:
+ *
+ *   - The background must be OPAQUE. A sticky cell is painted over the cells
+ *     scrolling underneath it, and a transparent one shows both at once.
+ *   - Which means it also has to follow the row's hover, or the frozen column
+ *     stays surface-coloured while the rest of the row lifts. `group-hover`
+ *     does that, and the `<tr>` carries `group`.
+ *
+ * The z-index is below the header's, which is the collision §10.7.4 warns
+ * about: where a sticky header crosses a frozen column, one of them has to win,
+ * and it should be the header — it is the thing that says what the frozen
+ * column *is*.
+ */
+export const frozenCell =
+  "sticky left-0 z-10 bg-surface group-hover:bg-raised";
+
+/**
+ * The scroll box the two dense grids live in.
+ *
+ * `overflow-auto` rather than `overflow-x-auto`, deliberately: a container with
+ * `overflow-x: auto` computes `overflow-y` to `auto` as well, so it is already a
+ * scroll container and `sticky top-0` inside it stops tracking the page. Making
+ * both axes explicit and capping the height means the sticky header and the
+ * frozen column are both relative to this box, which is the only way the two can
+ * work at once.
+ *
+ * The cap only bites when there are more rows than fit; a short table is
+ * unchanged.
+ */
+export function ScrollableTable({ children }: { children: ReactNode }) {
+  return (
+    <div className="max-h-[calc(100vh-18rem)] overflow-auto rounded-lg border border-hairline bg-surface">
+      {children}
+    </div>
+  );
+}
 
 /**
  * The heading row every data table in this application shares.
@@ -60,9 +106,21 @@ export type Column = {
  * enough to express those would grow a case per column type and be worse than the
  * duplication it replaced.
  */
-export function TableHead({ columns }: { columns: Column[] }) {
+export function TableHead({
+  columns,
+  sticky,
+}: {
+  columns: Column[];
+  /** Keep the heading row visible while the body scrolls (§10.7.4). Only
+   *  meaningful inside ScrollableTable, which is what the row is sticky to. */
+  sticky?: boolean;
+}) {
   return (
-    <thead className="text-xs uppercase tracking-wide text-secondary">
+    <thead
+      className={`text-xs uppercase tracking-wide text-secondary${
+        sticky ? " sticky top-0 z-20 bg-surface" : ""
+      }`}
+    >
       <tr>
         {columns.map((column, index) => (
           <th
@@ -70,6 +128,10 @@ export function TableHead({ columns }: { columns: Column[] }) {
             scope="col"
             className={`px-3 py-2.5 font-medium${
               column.align === "right" ? " text-right" : ""
+            }${
+              // z-30 so the corner cell sits above both the sticky header row
+              // and the frozen column it crosses.
+              column.sticky ? " sticky left-0 z-30 bg-surface" : ""
             }`}
           >
             {column.hidden ? (
@@ -141,13 +203,36 @@ export function EmptyState({
     <tbody>
       <tr className="border-t border-hairline">
         <td colSpan={colSpan} className="px-3 py-10 text-center">
-          <p className="text-sm text-secondary">
-            {filtered ? noResults : firstRun}
-          </p>
-          {!filtered && action && <div className="mt-4">{action}</div>}
+          <EmptyMessage
+            filtered={filtered}
+            firstRun={firstRun}
+            noResults={noResults}
+            action={action}
+          />
         </td>
       </tr>
     </tbody>
+  );
+}
+
+/** The words and the action, without the table cell around them — so the card
+ *  view below `md` says exactly what the table above it would. */
+export function EmptyMessage({
+  filtered,
+  firstRun,
+  noResults,
+  action,
+}: {
+  filtered: boolean;
+  firstRun: string;
+  noResults: string;
+  action?: ReactNode;
+}) {
+  return (
+    <>
+      <p className="text-sm text-secondary">{filtered ? noResults : firstRun}</p>
+      {!filtered && action && <div className="mt-4">{action}</div>}
+    </>
   );
 }
 
@@ -203,7 +288,9 @@ export function SourceFilterNotice({
           setParams(next, { replace: true });
           onCleared();
         }}
-        className="text-accent underline decoration-hairline underline-offset-2"
+        // A text button still has to be a 44px target (§10.7.5). `-my-2` keeps
+        // the extra height from pushing the banner taller than its one line.
+        className="-my-2 inline-flex min-h-11 items-center text-accent underline decoration-hairline underline-offset-2"
       >
         {clearLabel}
       </button>

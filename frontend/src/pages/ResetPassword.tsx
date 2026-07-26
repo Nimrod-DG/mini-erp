@@ -201,7 +201,7 @@ export function ResetPassword() {
           <button
             type="button"
             onClick={toSignIn}
-            className="mt-6 self-start text-sm text-accent underline-offset-4 hover:underline"
+            className="mt-4 inline-flex min-h-11 items-center self-start text-sm text-accent underline-offset-4 hover:underline"
           >
             {status === "done" ? "Go to sign in" : "Back to sign in"}
           </button>

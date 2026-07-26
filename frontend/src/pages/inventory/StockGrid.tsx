@@ -5,7 +5,9 @@ import { AppShell } from "../../components/AppShell";
 import {
   EmptyState,
   ErrorNotice,
+  frozenCell,
   Pagination,
+  ScrollableTable,
   SkeletonRows,
   TableHead,
 } from "../../components/ListStates";
@@ -89,11 +91,16 @@ export function StockGrid() {
         <ErrorNotice error={state.error} onRetry={reload} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+          {/* Horizontal scroll with a frozen first column, not cards (§10.7.4).
+              This grid's power is comparing a product across warehouses, and a
+              stack of cards throws that away — whereas a row of quantities whose
+              SKU has scrolled out of sight is numbers about nothing. */}
+          <ScrollableTable>
             <table className="w-full min-w-[34rem] text-left text-sm">
               <TableHead
+                sticky
                 columns={[
-                  { label: "Product" },
+                  { label: "Product", sticky: true },
                   { label: "Warehouse" },
                   { label: "On hand", align: "right" },
                 ]}
@@ -115,9 +122,9 @@ export function StockGrid() {
                   {state.data.data.map((cell) => (
                     <tr
                       key={`${cell.productId}:${cell.warehouseId}`}
-                      className="border-t border-hairline hover:bg-raised"
+                      className="group border-t border-hairline hover:bg-raised"
                     >
-                      <td className="px-3 py-3">
+                      <td className={`px-3 py-3 ${frozenCell}`}>
                         <Link
                           to={`/inventory/products/${cell.productId}`}
                           className="tabular underline decoration-hairline underline-offset-2"
@@ -148,7 +155,7 @@ export function StockGrid() {
                 </tbody>
               )}
             </table>
-          </div>
+          </ScrollableTable>
 
           {state.status === "ready" && (
             <Pagination

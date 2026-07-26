@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
 import { ErrorNotice, TableHead } from "../../components/ListStates";
+import { StickyActions } from "../../components/StickyActions";
 import { useToast } from "../../components/Toasts";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
@@ -263,6 +264,15 @@ function ReceiveForm({
               </p>
             )}
 
+          </section>
+
+          {/* §10.7.5's sticky bar, and this is the screen that clause names.
+              On a phone the line table is two screens tall and this button was
+              underneath all of it — on the one flow §10.7.1 calls genuinely
+              mobile, performed one-handed at a loading dock. */}
+          <StickyActions
+            hint="Safe to retry: this form carries one key, so posting twice cannot receive the goods twice."
+          >
             <button
               type="button"
               disabled={
@@ -279,15 +289,11 @@ function ReceiveForm({
                   })),
                 )
               }
-              className="mt-4 min-h-11 w-full rounded-md bg-accent px-4 text-sm font-medium text-canvas disabled:opacity-50"
+              className="min-h-12 w-full rounded-md bg-accent px-4 text-sm font-medium text-canvas disabled:opacity-50"
             >
               {busy ? "Posting…" : "Post receipt"}
             </button>
-            <p className="mt-2 text-xs text-secondary">
-              Safe to retry: this form carries one key, so posting twice cannot
-              receive the goods twice.
-            </p>
-          </section>
+          </StickyActions>
         </div>
       </div>
     </AppShell>

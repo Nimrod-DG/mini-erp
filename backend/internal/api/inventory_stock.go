@@ -210,15 +210,7 @@ func (s *server) listLowStock(c *fiber.Ctx) error {
 		return malformed(c, "%s", err)
 	}
 
-	where := `
-		FROM products p
-		LEFT JOIN (
-		  SELECT product_id, SUM(qty_on_hand) AS qty_on_hand
-		  FROM stock_balances GROUP BY product_id
-		) b ON b.product_id = p.id
-		WHERE p.deleted_at IS NULL
-		  AND p.reorder_point > 0
-		  AND COALESCE(b.qty_on_hand, 0) < p.reorder_point
+	where := lowStockFrom + `
 		  AND (p.sku ILIKE ? OR p.name ILIKE ?)`
 	args := []any{params.Like(), params.Like()}
 
@@ -229,12 +221,7 @@ func (s *server) listLowStock(c *fiber.Ctx) error {
 
 	var rows []lowStockRow
 	page := append(append([]any{}, args...), params.PageSize, params.Offset())
-	if err := tx.Raw(`
-		SELECT p.id AS product_id, p.sku, p.name, p.uom,
-		       COALESCE(b.qty_on_hand, 0)::text                  AS qty_on_hand,
-		       p.reorder_point::text                             AS reorder_point,
-		       (p.reorder_point - COALESCE(b.qty_on_hand, 0))::text AS shortfall
-		`+where+fmt.Sprintf(`
+	if err := tx.Raw(lowStockSelect+where+fmt.Sprintf(`
 		ORDER BY %s
 		LIMIT ? OFFSET ?`, params.OrderBy("p.id")), page...).Scan(&rows).Error; err != nil {
 		return err
@@ -242,6 +229,36 @@ func (s *server) listLowStock(c *fiber.Ctx) error {
 
 	return c.JSON(httpx.NewListResponse(rows, params, total))
 }
+
+// lowStockFrom and lowStockSelect are the definition of "below reorder point",
+// shared by this list and by the §10.2 dashboard widget.
+//
+// Extracted because there are now two callers, which is the bar §4 sets. The
+// point is not the saved typing: the widget says "4 products are low" and the
+// list it links to has to show four rows. Two copies of this expression is how
+// they come to disagree — one of them gains `AND p.is_active` and the count
+// stops matching the page underneath it.
+//
+// Both halves of the rule are load-bearing and neither is obvious:
+// `reorder_point > 0` excludes products nobody has set a level for (every
+// product defaults to zero, so without it the widget is noise on day one), and
+// the comparison is strict, so a product sitting exactly at its point is not yet
+// below it.
+const lowStockFrom = `
+		FROM products p
+		LEFT JOIN (
+		  SELECT product_id, SUM(qty_on_hand) AS qty_on_hand
+		  FROM stock_balances GROUP BY product_id
+		) b ON b.product_id = p.id
+		WHERE p.deleted_at IS NULL
+		  AND p.reorder_point > 0
+		  AND COALESCE(b.qty_on_hand, 0) < p.reorder_point`
+
+const lowStockSelect = `
+		SELECT p.id AS product_id, p.sku, p.name, p.uom,
+		       COALESCE(b.qty_on_hand, 0)::text                     AS qty_on_hand,
+		       p.reorder_point::text                                AS reorder_point,
+		       (p.reorder_point - COALESCE(b.qty_on_hand, 0))::text AS shortfall`
 
 // listLedger is GET /api/inventory/ledger — the full, filterable ledger (§10.4).
 //
@@ -292,12 +309,7 @@ func (s *server) listLedger(c *fiber.Ctx) error {
 		return malformed(c, "to must be an RFC 3339 timestamp.")
 	}
 
-	where := `
-		FROM stock_ledger l
-		JOIN products   p ON p.id = l.product_id
-		JOIN warehouses w ON w.id = l.warehouse_id
-		JOIN users      u ON u.id = l.created_by
-		` + ledgerSourceJoin + `
+	where := ledgerFrom + `
 		WHERE (?::uuid IS NULL OR l.product_id = ?)
 		  AND (?::uuid IS NULL OR l.warehouse_id = ?)
 		  AND (? = '' OR l.entry_type = ?)
@@ -324,16 +336,7 @@ func (s *server) listLedger(c *fiber.Ctx) error {
 
 	var rows []ledgerRow
 	page := append(append([]any{}, args...), params.PageSize, params.Offset())
-	if err := tx.Raw(`
-		SELECT l.id, l.occurred_at, l.entry_type,
-		       l.qty_delta::text AS qty_delta,
-		       l.unit_cost::text AS unit_cost,
-		       l.source_type, l.source_id, l.note,`+ledgerSourceColumns+`
-		       l.product_id, p.sku, p.name AS product_name,
-		       (p.deleted_at IS NOT NULL) AS product_deleted,
-		       l.warehouse_id, w.code AS warehouse_code,
-		       l.created_by AS created_by_id, u.full_name AS created_by_name
-		`+where+fmt.Sprintf(`
+	if err := tx.Raw(ledgerSelect+where+fmt.Sprintf(`
 		ORDER BY %s
 		LIMIT ? OFFSET ?`, params.OrderBy("l.id")), page...).Scan(&rows).Error; err != nil {
 		return err
@@ -367,6 +370,37 @@ const ledgerSourceJoin = `
 // ledgerSourceColumns is the projection half of the same thing.
 const ledgerSourceColumns = `
 		       gr.gr_number AS source_number, gr.po_id AS source_po_id,`
+
+// ledgerSelect and ledgerFrom are the ledger projection, in one place.
+//
+// Three callers read a ledger row now — the list, the single-row read after an
+// adjustment, and the §10.2 recent-activity widget — and all three must produce
+// the same shape, because all three fill the same `ledgerRow` struct and the
+// same table renders it. Two of them were already exact copies of each other
+// before the widget existed, which is the usual way a column gets added to one
+// and not the other.
+//
+// The product and warehouse joins carry NO deleted filter, deliberately. A
+// movement of a product someone deleted last week is still a movement that
+// happened, and adding `AND p.deleted_at IS NULL` here by reflex would delete
+// last quarter's history from three screens at once (§6.9.1, Trap 3). The
+// `productDeleted` flag is how a row says so instead.
+const ledgerSelect = `
+		SELECT l.id, l.occurred_at, l.entry_type,
+		       l.qty_delta::text AS qty_delta,
+		       l.unit_cost::text AS unit_cost,
+		       l.source_type, l.source_id, l.note,` + ledgerSourceColumns + `
+		       l.product_id, p.sku, p.name AS product_name,
+		       (p.deleted_at IS NOT NULL) AS product_deleted,
+		       l.warehouse_id, w.code AS warehouse_code,
+		       l.created_by AS created_by_id, u.full_name AS created_by_name`
+
+const ledgerFrom = `
+		FROM stock_ledger l
+		JOIN products   p ON p.id = l.product_id
+		JOIN warehouses w ON w.id = l.warehouse_id
+		JOIN users      u ON u.id = l.created_by
+		` + ledgerSourceJoin
 
 type adjustmentRequest struct {
 	ProductID   string         `json:"productId"`
@@ -505,20 +539,7 @@ func (s *server) createAdjustment(c *fiber.Ctx) error {
 // ledgerEntry reads one ledger row back with its joins resolved.
 func (s *server) ledgerEntry(tx *gorm.DB, id uuid.UUID) (*ledgerRow, error) {
 	var rows []ledgerRow
-	if err := tx.Raw(`
-		SELECT l.id, l.occurred_at, l.entry_type,
-		       l.qty_delta::text AS qty_delta,
-		       l.unit_cost::text AS unit_cost,
-		       l.source_type, l.source_id, l.note,`+ledgerSourceColumns+`
-		       l.product_id, p.sku, p.name AS product_name,
-		       (p.deleted_at IS NOT NULL) AS product_deleted,
-		       l.warehouse_id, w.code AS warehouse_code,
-		       l.created_by AS created_by_id, u.full_name AS created_by_name
-		FROM stock_ledger l
-		JOIN products   p ON p.id = l.product_id
-		JOIN warehouses w ON w.id = l.warehouse_id
-		JOIN users      u ON u.id = l.created_by
-		`+ledgerSourceJoin+`
+	if err := tx.Raw(ledgerSelect+ledgerFrom+`
 		WHERE l.id = ?`, id).Scan(&rows).Error; err != nil {
 		return nil, err
 	}

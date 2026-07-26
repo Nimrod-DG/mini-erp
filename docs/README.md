@@ -25,7 +25,7 @@ original except for the sixteen corrections listed in [`AUDIT.md`](AUDIT.md).
 | 5 | [Procurement](phases/phase-5-procurement.md) | ✅ | 8h |
 | 6 | [Finance stub](phases/phase-6-finance.md) | ✅ | 2h |
 | 7 | [Dashboard, seed, responsive](phases/phase-7-dashboard-seed.md) | ✅ | 6h |
-| — | **[Acceptance test](acceptance-test.md)** — MVP gate | | |
+| 7.5 | **[The acceptance walk](phases/phase-7.5-acceptance-walk.md)** — the MVP gate. How to walk [`acceptance-test.md`](acceptance-test.md) in a browser, and what is already verified without one | ✅ | 1.5h |
 | 8 | [Frontend tests, CI, polish](phases/phase-8-frontend-tests.md) | ➖ | 4h |
 | 9 | [Deployment](phases/phase-9-deployment.md) | ➖ | 4h |
 | 10 | [Documentation](phases/phase-10-documentation.md) | ➖ | 2h |

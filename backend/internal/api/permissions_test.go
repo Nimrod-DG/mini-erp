@@ -324,6 +324,72 @@ func TestB8EntitlementBeatsTheAdminShortcut(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
+// B13 — /api/me reports the EFFECTIVE level, not the stored one.
+// --------------------------------------------------------------------------
+
+// The bug this exists for, found by Phase 7's acceptance run and worth stating
+// plainly: `/api/me` used to return `user_module_roles` as stored, and a tenant
+// admin correctly has no rows there (§5.4, B7). So Rina — the seed's Nusantara
+// admin, the person acceptance step 10 is about — signed in to a sidebar with no
+// modules in it, no bottom tab bar, and no way to reach a single screen, while
+// every endpoint behind those links answered her requests perfectly.
+//
+// It went unnoticed for four phases because the one account anybody signed in
+// with by hand had explicit role rows, which makes the stored and effective maps
+// identical. B7 could not catch it either: B7 asks whether an implicit admin
+// gets *past the gate*, and she always did. The gap was only ever in what the
+// shell was told.
+//
+// So this test asserts the two maps for the same person and requires them to
+// differ in exactly the way §5.4 says they should.
+func TestB13MeReportsTheEffectiveLevelForATenantAdmin(t *testing.T) {
+	h := testsupport.NewHarness(t)
+	tenant := h.DB.NewTenant(t, "Implicit Admin Ltd")
+	admin := tenant.NewAdmin(t)
+
+	// The premise. If this ever fails, the fixture has started seeding rows for
+	// admins and the rest of the test is measuring nothing.
+	var stored int
+	tenant.Must(t, func(tx *gorm.DB) error {
+		return tx.Raw(`SELECT count(*) FROM user_module_roles WHERE user_id = ?`,
+			admin.ID).Row().Scan(&stored)
+	})
+	if stored != 0 {
+		t.Fatalf("the fixture gave the admin %d role rows; §5.4 says none", stored)
+	}
+
+	body := testsupport.Decode[struct {
+		ModuleRoles map[string]string `json:"moduleRoles"`
+	}](t, h.Get(t, "/api/me", admin.FirebaseUID))
+
+	for _, module := range []string{"procurement", "inventory", "finance"} {
+		if body.ModuleRoles[module] != "admin" {
+			t.Errorf("moduleRoles[%s] = %q, want admin — the nav is driven off this "+
+				"map, so an empty one is an admin who can reach nothing",
+				module, body.ModuleRoles[module])
+		}
+	}
+
+	// And a staff user's map is still what they were actually given: the fix
+	// must not have turned the effective map into "admin for everybody".
+	staff := tenant.NewUser(t, map[string]string{"inventory": "viewer"})
+	body = testsupport.Decode[struct {
+		ModuleRoles map[string]string `json:"moduleRoles"`
+	}](t, h.Get(t, "/api/me", staff.FirebaseUID))
+
+	if body.ModuleRoles["inventory"] != "viewer" {
+		t.Errorf("staff moduleRoles[inventory] = %q, want viewer",
+			body.ModuleRoles["inventory"])
+	}
+	for _, module := range []string{"procurement", "finance"} {
+		if level, present := body.ModuleRoles[module]; present {
+			t.Errorf("moduleRoles[%s] = %q, want absent — a missing row is `none`, "+
+				"and `none` is the absence of a key (§5.3)", module, level)
+		}
+	}
+}
+
+// --------------------------------------------------------------------------
 // Isolation, through the permission gate.
 // --------------------------------------------------------------------------
 

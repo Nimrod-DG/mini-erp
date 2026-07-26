@@ -82,10 +82,88 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // a new employee is indefensible.
 const minPasswordLength = 8
 
+// --------------------------------------------------------------------------
+// Business outcomes, as values.
+//
+// Every refusal below exists in two forms: a `…Error` constructor that returns
+// a *refusal, and the familiar helper that writes one to the response. The pair
+// exists because one piece of business logic — the goods receipt — now has two
+// callers, a handler and `cmd/seed`, and only one of them has a *fiber.Ctx to
+// write to.
+//
+// The constructors are the single definition, so a code, a message, or a
+// details payload cannot drift between "the endpoint refused" and "the function
+// refused". The writers are one line each and every existing call site is
+// unchanged.
+//
+// NOTE the shape carefully, because Trap 1 is exactly here: a *refusal is a
+// **real error**, so `if err != nil` means what it says. `httpx.Fail` still
+// returns nil, and `write` is the only thing that calls it.
+// --------------------------------------------------------------------------
+
+// refusal is a §9.8 error envelope that has not been written yet.
+type refusal struct {
+	status  int
+	code    string
+	message string
+	details map[string]any
+}
+
+// Error makes a refusal usable with errors.As. The text is for a log line, never
+// for a client — the client gets Message, through write.
+func (r *refusal) Error() string {
+	return fmt.Sprintf("%s: %s", r.code, r.message)
+}
+
+// write renders the refusal in the §9.8 envelope. It returns nil, like
+// everything built on httpx.Fail, because the body is already written.
+func (r *refusal) write(c *fiber.Ctx) error {
+	if r.details == nil {
+		return httpx.Fail(c, r.status, r.code, r.message)
+	}
+	return httpx.FailWith(c, r.status, r.code, r.message, r.details)
+}
+
+// malformedError is the §9.8 400: the request could not be understood as
+// written. Business rules that reject a well-formed request are 409 or 422.
+func malformedError(format string, args ...any) *refusal {
+	return &refusal{
+		status:  fiber.StatusBadRequest,
+		code:    "malformed",
+		message: fmt.Sprintf(format, args...),
+	}
+}
+
+func notFoundError(what string) *refusal {
+	return &refusal{
+		status:  fiber.StatusNotFound,
+		code:    "not_found",
+		message: what + " was not found.",
+	}
+}
+
+func stateConflictError(what, current string, allowed ...string) *refusal {
+	return &refusal{
+		status: fiber.StatusConflict,
+		code:   "state_conflict",
+		message: fmt.Sprintf("%s is %s. %s", what, current,
+			"Reload the document to see where it is now."),
+		details: map[string]any{"status": current, "allowed": allowed},
+	}
+}
+
+func unprocessableError(code, format string, args ...any) *refusal {
+	return &refusal{
+		status:  fiber.StatusUnprocessableEntity,
+		code:    code,
+		message: fmt.Sprintf(format, args...),
+	}
+}
+
 // malformed is the §9.8 400: the request could not be understood as written.
 // Business rules that reject a well-formed request are 409 or 422, not this.
 func malformed(c *fiber.Ctx, format string, args ...any) error {
-	return httpx.Fail(c, fiber.StatusBadRequest, "malformed", fmt.Sprintf(format, args...))
+	return malformedError(format, args...).write(c)
 }
 
 // notFound covers both "no such row" and "a row belonging to another tenant".
@@ -94,7 +172,7 @@ func malformed(c *fiber.Ctx, format string, args ...any) error {
 // workspace's user ID must not be able to tell an ID that exists elsewhere from
 // one that never existed — that difference is a cross-tenant existence oracle.
 func notFound(c *fiber.Ctx, what string) error {
-	return httpx.Fail(c, fiber.StatusNotFound, "not_found", what+" was not found.")
+	return notFoundError(what).write(c)
 }
 
 // forbidden is the §9.8 403 for a record-level refusal: the caller holds the
@@ -115,10 +193,7 @@ func forbidden(c *fiber.Ctx, format string, args ...any) error {
 // tell the user what to do next. `details.status` is the state the document is
 // actually in, so a screen can refresh itself rather than re-asking.
 func stateConflict(c *fiber.Ctx, what, current string, allowed ...string) error {
-	return httpx.FailWith(c, fiber.StatusConflict, "state_conflict",
-		fmt.Sprintf("%s is %s. %s", what, current,
-			"Reload the document to see where it is now."),
-		map[string]any{"status": current, "allowed": allowed})
+	return stateConflictError(what, current, allowed...).write(c)
 }
 
 // unprocessable is §9.8's "422 business-rule violation": the request is
@@ -128,8 +203,7 @@ func stateConflict(c *fiber.Ctx, what, current string, allowed ...string) error 
 // `supplier_required` — so the screen can put the message next to the field that
 // is missing instead of in a general-purpose banner.
 func unprocessable(c *fiber.Ctx, code, format string, args ...any) error {
-	return httpx.Fail(c, fiber.StatusUnprocessableEntity, code,
-		fmt.Sprintf(format, args...))
+	return unprocessableError(code, format, args...).write(c)
 }
 
 // pathUUID reads a UUID path parameter. A malformed one is a 404 rather than a

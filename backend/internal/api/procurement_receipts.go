@@ -39,6 +39,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -50,6 +51,7 @@ import (
 	"github.com/DGosal/mini-erp/backend/internal/db"
 	"github.com/DGosal/mini-erp/backend/internal/docnum"
 	"github.com/DGosal/mini-erp/backend/internal/httpx"
+	"github.com/DGosal/mini-erp/backend/internal/identity"
 )
 
 // receiptKeyConstraint is the UNIQUE (tenant_id, idempotency_key) on
@@ -223,6 +225,129 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 		return malformed(c, "The request body is not valid JSON.")
 	}
 
+	result, err := postGoodsReceipt(tx, caller, poID, key, req)
+	if err != nil {
+		// Every business outcome comes back as a *refusal built by the same
+		// constructors the rest of this package uses, so the endpoint's answers
+		// are identical whether the refusal was decided here or four calls down.
+		var refused *refusal
+		if errors.As(err, &refused) {
+			return refused.write(c)
+		}
+		return err
+	}
+
+	// §8.6.1 pins only the replay at 200. 201 for the creation is the ordinary
+	// meaning of the verb, both are `response.ok`, and the flag lets the
+	// confirmation panel say "had already been posted" rather than "posted".
+	if result.Replayed {
+		return c.JSON(result)
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+// ReceiptLine is one line of a goods receipt as a non-HTTP caller states it:
+// which order line, and how much of it arrived.
+//
+// The quantity is decimal **text**, not a float, for the same reason it is text
+// on the wire (I8): a NUMERIC(18,4) that has been through a float64 has lost
+// whatever it is going to lose before any arithmetic happens. The product is
+// deliberately absent — it comes from the order line, so a receipt cannot book
+// stock of something that was not ordered.
+type ReceiptLine struct {
+	POLineID uuid.UUID
+	Qty      string
+}
+
+// PostGoodsReceipt is the §8.4 cross-module transaction, for callers that are
+// not HTTP requests. `cmd/seed` is the only one.
+//
+// It exists so §15's requirement can be met literally: the seed's receipts go
+// through the same function the endpoint does, so the demo database is written
+// by the code under test rather than by a second implementation of it. A seed
+// that inserted its own stock ledger and journal rows would be the one place
+// that code was never checked against the real thing — and if it ever produced
+// an unbalanced journal, `jel_balanced` would refuse the commit, which is
+// exactly the safety net worth having.
+//
+// `tx` must already have tenant context: this runs no `db.WithTenant` of its
+// own, because the point of §8.4 is that everything lands in ONE transaction and
+// only the caller knows where that transaction begins and ends.
+//
+// Refusals come back as ordinary errors here. A seed meeting `over_receipt` has
+// a bug in the seed, not a business outcome to render, so there is nothing to
+// gain from unwrapping the *refusal — `log.Fatal` on it and read the message.
+func PostGoodsReceipt(tx *gorm.DB, caller *identity.Identity, poID uuid.UUID,
+	key, note string, lines []ReceiptLine) (GoodsReceiptSummary, error) {
+
+	inputs := make([]receiptLineInput, 0, len(lines))
+	for _, line := range lines {
+		inputs = append(inputs, receiptLineInput{
+			POLineID:    line.POLineID.String(),
+			QtyReceived: httpx.Numeric(line.Qty),
+		})
+	}
+
+	result, err := postGoodsReceipt(tx, caller, poID, key,
+		receiptRequest{Note: note, Lines: inputs})
+	if err != nil {
+		return GoodsReceiptSummary{}, err
+	}
+	return GoodsReceiptSummary{
+		GRNumber:      result.Receipt.GRNumber,
+		OrderStatus:   result.PurchaseOrder.Status,
+		EntryNumber:   result.Finance.EntryNumber,
+		LedgerEntries: result.Inventory.EntryCount,
+		Replayed:      result.Replayed,
+	}, nil
+}
+
+// GoodsReceiptSummary is the flat, exported version of the §8.4 result.
+//
+// The full `receiptResult` is shaped for the confirmation panel and is
+// unexported for the ordinary reason: it is a response body, and an exported
+// function handing one back would make its every field part of this package's
+// API. What a non-HTTP caller wants is a line for a log — which document was
+// written, where the order got to, and proof that the other two modules were
+// written in the same breath.
+//
+// `Replayed` is what makes the seed idempotent visibly rather than silently: a
+// second `make seed` reports the same GR numbers with Replayed true, and no rows
+// are written.
+type GoodsReceiptSummary struct {
+	GRNumber string
+	// OrderStatus is `partially_received` or `received` — where the receipt left
+	// the purchase order.
+	OrderStatus string
+	// EntryNumber is the [FINANCE] journal entry posted in the same transaction.
+	EntryNumber string
+	// LedgerEntries is how many [INVENTORY] rows were appended.
+	LedgerEntries int
+	Replayed      bool
+}
+
+// postGoodsReceipt is §8.4 itself, with no *fiber.Ctx in sight.
+//
+// IT IS SEPARATE FROM THE HANDLER SO THAT `cmd/seed` CAN CALL IT. §15 requires
+// the seed's receipts to go "through PostGoodsReceipt rather than inserting
+// ledger and journal rows directly — that way the seed exercises the same code
+// path as the application and cannot drift from it". A seed that wrote its own
+// stock ledger rows would be a second implementation of the most important
+// transaction in the system, and the demo database would be the one place it
+// was never checked against the real one.
+//
+// The split is exactly at the HTTP boundary. Parsing a path parameter, a header,
+// and a JSON body stays in the handler; everything from the first replay lookup
+// to the committed result is here. Business outcomes leave as `*refusal` errors
+// rather than as written responses, which is the only way a caller with no
+// response to write can hear about them — and it keeps Trap 1 satisfied, because
+// these are real errors and `if err != nil` fires on them.
+//
+// `tx` is the caller's transaction and this function neither opens nor commits
+// one. For a request that is TenantTx's transaction; for the seed it is one
+// `db.WithTenant` opened. Either way every step below is in it, which is the
+// whole claim of §8.4.
+func postGoodsReceipt(tx *gorm.DB, caller *identity.Identity, poID uuid.UUID, key string, req receiptRequest) (*receiptResult, error) {
 	// The ordinary replay: the first request succeeded and committed, and the
 	// phone asked again because it never saw the answer. Answered with a read, so
 	// the common case never takes a lock and never touches a constraint.
@@ -232,10 +357,10 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 	// which is a 409 for the person whose receipt worked.
 	replay, err := receiptByKey(tx, key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if replay != nil {
-		return s.replayGoodsReceipt(c, tx, poID, *replay)
+		return replayGoodsReceipt(tx, poID, *replay)
 	}
 
 	// ---- Step 1: lock, then validate (§8.4 step 1, §8.6.3). ----------------
@@ -247,10 +372,10 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 	if err := tx.Raw(`
 		SELECT status, warehouse_id FROM purchase_orders WHERE id = ? FOR UPDATE`, poID).
 		Scan(&orders).Error; err != nil {
-		return err
+		return nil, err
 	}
 	if len(orders) == 0 {
-		return notFound(c, "That purchase order")
+		return nil, notFoundError("That purchase order")
 	}
 
 	// ASK ABOUT THE KEY AGAIN, now that the lock has been taken. The read above
@@ -265,23 +390,23 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 	// on that 422 before this second read existed.
 	replay, err = receiptByKey(tx, key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if replay != nil {
-		return s.replayGoodsReceipt(c, tx, poID, *replay)
+		return replayGoodsReceipt(tx, poID, *replay)
 	}
 
 	if orders[0].Status != "open" && orders[0].Status != "partially_received" {
-		return stateConflict(c, "This purchase order", orders[0].Status,
+		return nil, stateConflictError("This purchase order", orders[0].Status,
 			"open", "partially_received")
 	}
 
 	lines, err := resolveReceiptLines(req.Lines)
 	if err != nil {
-		return malformed(c, "%s", err)
+		return nil, malformedError("%s", err)
 	}
 	if len(lines) == 0 {
-		return unprocessable(c, "empty_receipt",
+		return nil, unprocessableError("empty_receipt",
 			"Say how much of at least one line arrived — a receipt of nothing is not a receipt.")
 	}
 
@@ -299,20 +424,20 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 		WHERE po_id = ? AND id IN ?
 		ORDER BY id
 		FOR UPDATE`, poID, ids).Scan(&locked).Error; err != nil {
-		return err
+		return nil, err
 	}
 	if len(locked) != len(ids) {
 		// A line that does not exist and a line belonging to another order are the
 		// same 404, for the same reason every other miss is (§9.8).
-		return notFound(c, "One of those order lines")
+		return nil, notFoundError("One of those order lines")
 	}
 
 	over, err := overReceiptLines(tx, lines)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(over) > 0 {
-		return refuseOverReceipt(c, over)
+		return nil, overReceiptRefusal(over)
 	}
 
 	// ---- Step 2: the receipt header, under a savepoint. --------------------
@@ -326,12 +451,12 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 	// A savepoint rather than §8.6.1's "roll back and open a second transaction":
 	// see the note on replayGoodsReceipt.
 	if err := tx.SavePoint("goods_receipt_header").Error; err != nil {
-		return err
+		return nil, err
 	}
 
 	grNumber, err := docnum.Allocate(tx, caller.TenantID, docnum.GR)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	grID := uuid.New()
 	if err := tx.Exec(`
@@ -343,22 +468,22 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 
 		if db.IsUniqueViolation(err) && db.ConstraintName(err) == receiptKeyConstraint {
 			if err := tx.RollbackTo("goods_receipt_header").Error; err != nil {
-				return err
+				return nil, err
 			}
 			raced, err := receiptByKey(tx, key)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if raced == nil {
 				// The row that just collided is not there on a fresh read. Nothing
 				// deletes a goods receipt — erp_app has DELETE revoked — so this
 				// cannot happen, and guessing at it would return a wrong answer.
-				return fmt.Errorf(
+				return nil, fmt.Errorf(
 					"api: idempotency key %s collided but no receipt carries it", key)
 			}
-			return s.replayGoodsReceipt(c, tx, poID, *raced)
+			return replayGoodsReceipt(tx, poID, *raced)
 		}
-		return err
+		return nil, err
 	}
 
 	// ---- Step 3: the receipt lines. ----------------------------------------
@@ -374,7 +499,7 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 		SELECT gen_random_uuid(), ?, ?, r.po_line_id, pol.product_id, r.qty
 		FROM (VALUES `+values+`) AS r(po_line_id, qty)
 		JOIN purchase_order_lines pol ON pol.id = r.po_line_id`, args...).Error; err != nil {
-		return err
+		return nil, err
 	}
 
 	// ---- Step 4: the order's new status. -----------------------------------
@@ -385,7 +510,7 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 	if err := tx.Raw(`
 		SELECT COALESCE(bool_and(qty_received >= qty_ordered), false)
 		FROM po_line_status WHERE po_id = ?`, poID).Scan(&complete).Error; err != nil {
-		return err
+		return nil, err
 	}
 	status := "partially_received"
 	if complete {
@@ -393,35 +518,35 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 	}
 	if err := tx.Exec(`
 		UPDATE purchase_orders SET status = ? WHERE id = ?`, status, poID).Error; err != nil {
-		return err
+		return nil, err
 	}
 
 	// ---- Step 5: [INVENTORY]. ----------------------------------------------
 	ledgerIDs, err := postReceiptStockLedger(tx, caller, grID, orders[0].WarehouseID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// ---- Step 6: [FINANCE]. ------------------------------------------------
 	journal, err := postReceiptJournal(tx, caller, grID, grNumber)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// ---- Step 7: audit. ----------------------------------------------------
 	// TODO(post-mvp): audit gr.posted
 
 	// ---- Step 8: commit, which TenantTx does on the way out. ---------------
-	result, err := s.receiptResult(tx, grID)
+	result, err := readReceiptResult(tx, grID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	result.Inventory = receiptInventoryResult{
 		LedgerEntryIDs: ledgerIDs,
 		EntryCount:     len(ledgerIDs),
 	}
 	result.Finance = *journal
-	return c.Status(fiber.StatusCreated).JSON(result)
+	return result, nil
 }
 
 // replayGoodsReceipt answers a repeated Idempotency-Key with the receipt the
@@ -439,23 +564,23 @@ func (s *server) createGoodsReceipt(c *fiber.Ctx) error {
 // The body is rebuilt rather than remembered, which is what makes it *the same*
 // body: there is one function that renders a receipt result and both paths call
 // it.
-func (s *server) replayGoodsReceipt(c *fiber.Ctx, tx *gorm.DB, poID uuid.UUID, replay receiptRef) error {
+func replayGoodsReceipt(tx *gorm.DB, poID uuid.UUID, replay receiptRef) (*receiptResult, error) {
 	// A key belonging to a receipt against a different order is a client bug, and
 	// the friendly reading of it — hand back that other order's receipt — is the
 	// dangerous one: the phone would report goods arriving against an order nobody
 	// touched.
 	if replay.POID != poID {
-		return unprocessable(c, "idempotency_key_reused",
+		return nil, unprocessableError("idempotency_key_reused",
 			"That Idempotency-Key already belongs to a receipt against a different "+
 				"purchase order. Reopen the form to get a new one.")
 	}
 
-	result, err := s.receiptResult(tx, replay.ID)
+	result, err := readReceiptResult(tx, replay.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	result.Replayed = true
-	return c.JSON(result)
+	return result, nil
 }
 
 // --------------------------------------------------------------------------
@@ -620,7 +745,7 @@ func receiptByKey(tx *gorm.DB, key string) (*receiptRef, error) {
 // Both the fresh post and the replay go through this, which is what makes the
 // replay's body "the same body the first call returned" by construction rather
 // than by two pieces of code agreeing.
-func (s *server) receiptResult(tx *gorm.DB, grID uuid.UUID) (*receiptResult, error) {
+func readReceiptResult(tx *gorm.DB, grID uuid.UUID) (*receiptResult, error) {
 	detail, err := goodsReceiptDetailFor(tx, grID)
 	if err != nil {
 		return nil, err
@@ -762,12 +887,12 @@ func overReceiptLines(tx *gorm.DB, lines []resolvedReceiptLine) ([]overReceiptRo
 	return offending, nil
 }
 
-// refuseOverReceipt is the 422 of §8.4 step 1, naming every offending line.
+// overReceiptRefusal is the 422 of §8.4 step 1, naming every offending line.
 //
 // One code for the rule and `details.lines` for the arithmetic, so the receipt
 // form can put the refusal next to the box that is wrong rather than in a banner
 // the user has to map back onto eight rows themselves.
-func refuseOverReceipt(c *fiber.Ctx, offending []overReceiptRow) error {
+func overReceiptRefusal(offending []overReceiptRow) *refusal {
 	details := make([]map[string]any, 0, len(offending))
 	names := make([]string, 0, len(offending))
 	for _, row := range offending {
@@ -785,10 +910,13 @@ func refuseOverReceipt(c *fiber.Ctx, offending []overReceiptRow) error {
 			row.QtyOutstanding, row.QtyOrdered, row.QtyRequested))
 	}
 
-	return httpx.FailWith(c, fiber.StatusUnprocessableEntity, "over_receipt",
-		fmt.Sprintf("More arrived than was ordered: %s. Correct the quantities, or "+
+	return &refusal{
+		status: fiber.StatusUnprocessableEntity,
+		code:   "over_receipt",
+		message: fmt.Sprintf("More arrived than was ordered: %s. Correct the quantities, or "+
 			"raise a second order for the excess.", strings.Join(names, "; ")),
-		map[string]any{"lines": details})
+		details: map[string]any{"lines": details},
+	}
 }
 
 // receiptValues renders the submitted lines as a SQL VALUES list, so the

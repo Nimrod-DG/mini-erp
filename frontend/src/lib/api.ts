@@ -1047,3 +1047,59 @@ export function listAccounts(query: ListQuery = {}) {
     `/api/finance/accounts${queryString(query)}`,
   );
 }
+
+// --------------------------------------------------------------------------
+// Dashboard (§9.7, §10.2).
+//
+// One request for the whole home screen. Every field is optional because the
+// server omits a widget the caller cannot read — and that is the whole design:
+// `{ lowStock: { count: 0 } }` says "nothing is low", while the widget's absence
+// says "you cannot see Inventory". A screen that could not tell those apart
+// would show a stock panel reporting zero to somebody with no stock access.
+//
+// So these are `?:` rather than `| null`, and the page renders `summary.lowStock
+// && <LowStockWidget …>`. Do not default them.
+// --------------------------------------------------------------------------
+
+export type OpenOrdersWidget = {
+  /** `open` **and** `partially_received`: an order half of which has arrived is
+   *  still an order somebody is waiting on. */
+  count: number;
+  totalValue: number;
+};
+
+export type PendingApprovalsWidget = {
+  /** Everybody's number, including requisitions this caller may not approve. */
+  count: number;
+  /** Whether this caller holds `approver`, and so whether `queue` is populated.
+   *  Sent explicitly: an empty queue is otherwise indistinguishable from
+   *  "nothing is waiting". */
+  canApprove: boolean;
+  /** The oldest few, for the inline decision §10.2 gives an approver. Includes
+   *  the caller's own submissions — hiding them would make the count disagree
+   *  with the list underneath it, and C2 refuses them server-side anyway. */
+  queue: Requisition[];
+};
+
+export type LowStockWidget = {
+  count: number;
+  /** The worst few by shortfall. `count` is the real total, so a reader knows
+   *  when there is more to see. */
+  products: LowStockRow[];
+};
+
+export type RecentActivityWidget = {
+  entries: LedgerEntry[];
+};
+
+// fallow-ignore-next-line unused-type
+export type DashboardSummary = {
+  openOrders?: OpenOrdersWidget;
+  pendingApprovals?: PendingApprovalsWidget;
+  lowStock?: LowStockWidget;
+  recentActivity?: RecentActivityWidget;
+};
+
+export function getDashboardSummary() {
+  return apiFetch<DashboardSummary>("/api/dashboard/summary");
+}

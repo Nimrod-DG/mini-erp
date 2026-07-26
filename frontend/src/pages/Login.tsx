@@ -177,7 +177,7 @@ export function Login() {
         <button
           type="button"
           onClick={() => switchMode(mode === "signIn" ? "reset" : "signIn")}
-          className="mt-4 self-start text-sm text-accent underline-offset-4 hover:underline"
+          className="mt-2 inline-flex min-h-11 items-center self-start text-sm text-accent underline-offset-4 hover:underline"
         >
           {mode === "signIn" ? "Forgot your password?" : "Back to sign in"}
         </button>

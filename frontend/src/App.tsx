@@ -11,7 +11,7 @@ import {
 } from "./components/RequireRole";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { ThemeProvider } from "./hooks/useTheme";
-import { Dashboard } from "./pages/Dashboard";
+import { DashboardPage } from "./pages/dashboard/DashboardPage";
 import { Login } from "./pages/Login";
 import { ResetPassword } from "./pages/ResetPassword";
 import { TenantDetailPage } from "./pages/admin/TenantDetail";
@@ -69,7 +69,7 @@ export default function App() {
                 element={
                   <Signed>
                     <Home>
-                      <Dashboard />
+                      <DashboardPage />
                     </Home>
                   </Signed>
                 }

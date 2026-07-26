@@ -2,13 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
-import {
-  EmptyState,
-  ErrorNotice,
-  Pagination,
-  SkeletonRows,
-  TableHead,
-} from "../../components/ListStates";
+import { DocumentCard } from "../../components/CardList";
+import { ResponsiveList } from "../../components/ResponsiveList";
 import { StatusChip, StatusFilter } from "../../components/StatusChip";
 import { useAsync } from "../../hooks/useAsync";
 import {
@@ -17,8 +12,6 @@ import {
   type PurchaseOrderStatus,
 } from "../../lib/api";
 import { formatMoney, formatQty } from "../../lib/format";
-
-const COLUMNS = 6;
 
 const STATUSES: readonly PurchaseOrderStatus[] = [
   "open",
@@ -33,6 +26,10 @@ const STATUSES: readonly PurchaseOrderStatus[] = [
  * The received/ordered figures come from `po_line_status`, which sums the goods
  * receipt lines on every read. There is no stored counter anywhere behind this
  * column (I6), so it cannot disagree with the receipts it is describing.
+ *
+ * Cards below `md`, for the same reason as the requisition list: an order is
+ * read one at a time, and this is a screen a manager checks on the move
+ * (§10.7.1, §10.7.4).
  */
 export function OrderList() {
   const [page, setPage] = useState(1);
@@ -57,6 +54,20 @@ export function OrderList() {
   const { state: suppliers } = useAsync("order-filter-suppliers", () =>
     listSuppliers({ pageSize: 100, sort: "code" }),
   );
+
+  /** The requisition this order came from — on both the row and the card. */
+  const fromRequisition = (row: {
+    requisitionId: string | null;
+    requisitionNumber: string | null;
+  }) =>
+    row.requisitionNumber && (
+      <Link
+        to={`/procurement/requisitions/${row.requisitionId}`}
+        className="tabular text-secondary"
+      >
+        from {row.requisitionNumber}
+      </Link>
+    );
 
   return (
     <AppShell title="Purchase orders">
@@ -107,98 +118,78 @@ export function OrderList() {
         </div>
       </div>
 
-      {state.status === "error" ? (
-        <ErrorNotice error={state.error} onRetry={reload} />
-      ) : (
-        <>
-          <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
-            <table className="w-full min-w-[52rem] text-left text-sm">
-              <TableHead
-                columns={[
-                  { label: "Number" },
-                  { label: "Status" },
-                  { label: "Supplier" },
-                  { label: "Expected" },
-                  { label: "Received", align: "right" },
-                  { label: "Total", align: "right" },
-                ]}
-              />
-
-              {state.status === "loading" && <SkeletonRows cols={COLUMNS} />}
-
-              {state.status === "ready" && state.data.data.length === 0 && (
-                <EmptyState
-                  colSpan={COLUMNS}
-                  filtered={search !== "" || status !== "" || supplierId !== ""}
-                  firstRun="No purchase orders yet. They are not created by hand — approving a requisition creates one."
-                  noResults="No orders match those filters."
-                />
+      <ResponsiveList
+        state={state}
+        onRetry={reload}
+        onPage={setPage}
+        minWidth="min-w-[52rem]"
+        filtered={search !== "" || status !== "" || supplierId !== ""}
+        firstRun="No purchase orders yet. They are not created by hand — approving a requisition creates one."
+        noResults="No orders match those filters."
+        columns={[
+          { label: "Number" },
+          { label: "Status" },
+          { label: "Supplier" },
+          { label: "Expected" },
+          { label: "Received", align: "right" },
+          { label: "Total", align: "right" },
+        ]}
+        row={(row) => (
+          <tr key={row.id} className="border-t border-hairline hover:bg-raised">
+            <td className="px-3 py-3">
+              <Link
+                to={`/procurement/orders/${row.id}`}
+                className="tabular font-medium text-accent"
+              >
+                {row.poNumber}
+              </Link>
+              {row.requisitionNumber && (
+                <div className="text-xs">{fromRequisition(row)}</div>
               )}
-
-              {state.status === "ready" && state.data.data.length > 0 && (
-                <tbody>
-                  {state.data.data.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-t border-hairline hover:bg-raised"
-                    >
-                      <td className="px-3 py-3">
-                        <Link
-                          to={`/procurement/orders/${row.id}`}
-                          className="tabular font-medium text-accent"
-                        >
-                          {row.poNumber}
-                        </Link>
-                        {row.requisitionNumber && (
-                          <div className="text-xs">
-                            <Link
-                              to={`/procurement/requisitions/${row.requisitionId}`}
-                              className="tabular text-secondary"
-                            >
-                              from {row.requisitionNumber}
-                            </Link>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-3">
-                        <StatusChip status={row.status} />
-                      </td>
-                      <td className="px-3 py-3">
-                        {row.supplierName}
-                        <div className="text-xs text-secondary">
-                          {row.warehouseCode}
-                        </div>
-                      </td>
-                      {/* A DATE, rendered as it arrived. Putting it through a
-                          timezone would move it a day for half the world (§2.5.3). */}
-                      <td className="px-3 py-3 tabular">
-                        {row.expectedAt ?? "—"}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular">
-                        {formatQty(row.qtyReceived)} /{" "}
-                        {formatQty(row.qtyOrdered)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular">
-                        {formatMoney(row.totalAmount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              )}
-            </table>
-          </div>
-
-          {state.status === "ready" && (
-            <Pagination
-              page={state.data.page}
-              pageSize={state.data.pageSize}
-              totalItems={state.data.totalItems}
-              totalPages={state.data.totalPages}
-              onPage={setPage}
-            />
-          )}
-        </>
-      )}
+            </td>
+            <td className="px-3 py-3">
+              <StatusChip status={row.status} />
+            </td>
+            <td className="px-3 py-3">
+              {row.supplierName}
+              <div className="text-xs text-secondary">{row.warehouseCode}</div>
+            </td>
+            {/* A DATE, rendered as it arrived. Putting it through a timezone
+                would move it a day for half the world (§2.5.3). */}
+            <td className="tabular px-3 py-3">{row.expectedAt ?? "—"}</td>
+            <td className="tabular px-3 py-3 text-right">
+              {formatQty(row.qtyReceived)} / {formatQty(row.qtyOrdered)}
+            </td>
+            <td className="tabular px-3 py-3 text-right">
+              {formatMoney(row.totalAmount)}
+            </td>
+          </tr>
+        )}
+        card={(row) => (
+          <DocumentCard
+            key={row.id}
+            to={`/procurement/orders/${row.id}`}
+            number={row.poNumber}
+            caption={row.supplierName}
+            chip={<StatusChip status={row.status} />}
+            fields={[
+              { label: "Expected", value: row.expectedAt ?? "—" },
+              {
+                label: "Total",
+                value: formatMoney(row.totalAmount),
+                align: "right",
+              },
+              { label: "Warehouse", value: row.warehouseCode },
+              {
+                label: "Received",
+                value: `${formatQty(row.qtyReceived)} / ${formatQty(row.qtyOrdered)}`,
+                align: "right",
+              },
+            ]}
+            footer={fromRequisition(row)}
+          />
+        )}
+      />
     </AppShell>
   );
 }

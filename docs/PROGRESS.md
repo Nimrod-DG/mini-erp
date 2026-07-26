@@ -27,49 +27,134 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
-**Phase:** 6 — **DONE** (the finance read side: two endpoints, one page, and the
-receipt confirmation panel's second link)
+**Phase:** 7 — **BUILD COMPLETE, GATE NOT CROSSED.** All three build parts are
+done and green (the dashboard, the seed, the responsive pass), and **all
+twenty-five acceptance steps are verified at the API level**. What remains is the
+browser walk, which is now its own phase.
+
 **Next action:** open
-[`phases/phase-7-dashboard-seed.md`](phases/phase-7-dashboard-seed.md) in a
-**new session**. Phase 7 is the MVP gate — the seed script, the twenty-five-step
-[acceptance test](acceptance-test.md), and the first time most of this
-application is opened in a browser at all (see below).
+[`phases/phase-7.5-acceptance-walk.md`](phases/phase-7.5-acceptance-walk.md) in a
+**new session** and walk it. Do **not** start Phase 8 until it is done.
 
-### Every browser walkthrough is deliberately deferred to Phase 7
+### What was and was not verified this phase
 
-**Decided 2026-07-26. Do not treat an unwalked screen as an oversight before
-then.** Phase 7 already ends with the MVP gate — the full twenty-five-step
-[acceptance test](acceptance-test.md), on a 360px viewport, in both light and dark
-mode — so it is a walkthrough of the whole application by construction. Running
-one per phase as well would mean walking the same flows five times, and the last
-walk is the one that counts because it is the only one performed against the
-finished thing.
+**Verified mechanically, and green:** the whole Go suite (Groups A–L, including
+the new Group L), the frontend build and lint, and seed idempotency at the
+*content* level — an md5 over every document, ledger row, and journal line is
+byte-identical across three consecutive `make seed` runs.
 
-**What that means for Phase 7: its acceptance-test run is the first time most of
-this application will have been seen in a browser.** Budget for finding things,
-not just for confirming them. Phase 4 is the calibration — its walkthrough found
-three real problems in about an hour, on one module, one of which
-(`TestDeletedProductsStockStaysVisibleEverywhere`) was a genuine correctness bug
-with a test now standing behind it.
+**Verified against the running application:** roughly **150 assertions covering
+all twenty-five acceptance steps**, driven with real Firebase ID tokens for all
+eight seeded accounts against the real server on the real seeded database. Every
+business rule the acceptance test names holds: the two refusal codes, segregation
+of duties for staff *and* admins, `last_admin`, the cross-module transaction and
+its exact ledger/journal/balance effects, over-receipt writing nothing, the
+idempotent replay, `in_use`, the full soft-delete/restore loop for all three
+entities, and cross-tenant isolation by pasted UUID.
 
-Never opened in a browser:
+The driver was a throwaway — it needs a live server and live Firebase, so it
+cannot run in CI and would rot in the repo, and every assertion it makes is
+already in the Go suite against a container. It was deleted after use. The
+database was snapshotted first and **restored byte-identically afterwards**
+(same md5), so the demo is untouched.
+
+**Not verified, and it is the gate:** everything above the API. Whether a control
+is *rendered* or hidden (I12 makes hiding cosmetic, so both readings pass at the
+API), the 360px layout, both themes, whether a link goes where it claims, and the
+copy as a person reads it.
+
+**Two real findings came out of the API pass**, both fixed: the `/api/me`
+effective-roles bug below, and four touch targets under 44px. That is the
+calibration for what the browser walk should expect.
+
+**Two things the API pass established about the *local database*, not the code**,
+which will otherwise read as failures:
+
+- `HND-GLOVE` and `PKG-BOX-L` sit on **open** orders, so deleting them is refused
+  with `in_use` — correct (G4), and step 18 needs a product on a closed order:
+  `OFF-PAPER` or `HND-PALLET`.
+- Nusantara has **three** tenant admins, because two scratch accounts from Phases
+  2–3 are still here. `last_admin` therefore does not fire for Rina. Confirmed
+  correct by temporarily demoting the other two.
+
+### The browser walkthrough was deferred to this phase, and is what remains
+
+**Decided 2026-07-26. Do not treat an unwalked screen as an oversight.** The MVP
+gate is the full twenty-five-step [acceptance test](acceptance-test.md), on a
+360px viewport, in both light and dark mode — a walkthrough of the whole
+application by construction. Running one per phase as well would have meant
+walking the same flows five times, and only the last walk is performed against
+the finished thing.
+
+Phase 4 is the calibration: its walkthrough found three real problems in about an
+hour, on one module, one of which
+(`TestDeletedProductsStockStaysVisibleEverywhere`) was a genuine correctness bug.
+Phase 7's API-only pass has already found a second
+(`TestB13MeReportsTheEffectiveLevelForATenantAdmin`). Expect more.
+
+Still never opened in a browser:
 
 | Screens | From |
 |---|---|
 | `/admin/tenants`, `/admin/tenants/new`, `/admin/tenants/:id`, `/settings/users`, `/settings/users/new`, `/settings/users/:id` | Phase 3 |
 | the six procurement screens — requisition list, create, detail, PO list, PO detail, suppliers | Phase 5A |
 | `/procurement/orders/:id/receive` and **the §10.3 confirmation panel** | Phase 5B |
-| `/finance` — including **both** links out of the confirmation panel, which now exist | Phase 6 |
+| `/finance` — including **both** links out of the confirmation panel | Phase 6 |
+| **the four dashboard widgets**, the card view of the two document lists, the frozen columns on the two grids, and the sticky action bars | Phase 7 |
 
 Walked already, and still worth re-walking at the gate: Phase 2's sign-in and
 Phase 4's six inventory screens.
 
-**The approval step needs two people.** The dev account
-(`dgjy2019@gmail.com`) is a tenant admin and so resolves to `admin` in every
-module — but C2 forbids approving your own requisition for *everybody*, admins
-included. So the walk needs a second user holding `procurement: approver`, or the
-approval step cannot be performed at all. Phase 7's seed creates seven users and
-is the natural place for that to stop being a manual step.
+**The approval step needs two people, and now it has them.** C2 forbids approving
+your own requisition for *everybody*, tenant admins included, so the walk needs a
+second user holding `procurement: approver`. The seed provides one per tenant —
+Budi at Nusantara, Intan at Bahari. That is no longer a manual step.
+
+### The seeded demo (§15)
+
+`make seed` is idempotent and self-verifying. Everything below exists in the
+local database now. Password for every account: `password123`.
+
+| Email | Workspace | Tenant role | Procurement | Inventory | Finance |
+|---|---|---|---|---|---|
+| `super@erp.test` | *platform* | superadmin | — | — | — |
+| `rina@nusantara.test` | Nusantara Retail | admin | *implicit* admin | *implicit* admin | *implicit* admin |
+| `budi@nusantara.test` | Nusantara Retail | staff | approver | viewer | none |
+| `sari@nusantara.test` | Nusantara Retail | staff | user | user | none |
+| `dewi@nusantara.test` | Nusantara Retail | staff | viewer | none | admin |
+| `agus@bahari.test` | Bahari Logistics | admin | *implicit* admin | *implicit* admin | **none — not entitled** |
+| `manager@bahari.test` | Bahari Logistics | staff | approver | approver | none |
+| `staff@bahari.test` | Bahari Logistics | staff | user | viewer | none |
+
+Nusantara is `Asia/Jakarta` with all three modules; Bahari is `Asia/Makassar`
+with **no Finance**. Per tenant: 2 warehouses, 10 products (1 soft-deleted, 1
+discontinued, **3 below reorder point**), 5 suppliers (1 inactive), ~30 ledger
+rows spread across the preceding 60 days, 13 requisitions (2 draft, 3 submitted,
+1 rejected, 1 cancelled, 6 approved) and the 6 orders those approvals produced
+(2 open — one overdue — 1 partially received, 2 received, 1 cancelled), with 4
+goods receipts that each wrote stock ledger rows **and** a balanced journal entry
+in the same transaction.
+
+**Leftover scratch rows from Phases 2–3 are still in the local database and were
+deliberately not deleted:** a product `SKU-001 Widget`, a warehouse `WH-1`, and
+three accounts (`dgjy2019@gmail.com`, `phase2-check@example.test`,
+`superadmin@example.test`). They are harmless — none of the acceptance steps
+touch them — and `dgjy2019@gmail.com` is the developer's own Firebase account and
+a working Nusantara tenant admin, which is useful. To get a pristine demo instead:
+
+```sql
+DELETE FROM stock_ledger WHERE product_id IN (SELECT id FROM products WHERE sku = 'SKU-001');
+DELETE FROM products   WHERE sku  = 'SKU-001';
+DELETE FROM warehouses WHERE code = 'WH-1';
+DELETE FROM users      WHERE email IN ('phase2-check@example.test','superadmin@example.test');
+```
+
+**The seed adopts rather than collides.** `tenants` upserts on `slug` and `users`
+on `email`, returning the row's real id — which is why the seed ran against a
+database that already held a hand-made `nusantara` workspace instead of aborting
+on `tenants_slug_key`. Every other row uses a UUIDv5 derived from what it is
+(`cmd/seed/ids.go`), so a reseed writes to the same rows and demo URLs survive a
+rebuild.
 
 Migration files that now exist (`backend/migrations/`), applied in this order by
 `cmd/migrate`:
@@ -84,7 +169,7 @@ Migration files that now exist (`backend/migrations/`), applied in this order by
 | `005_rls_grants.up.sql` | RLS enable/force/policy, grants, ledger and superadmin revokes, `seed_tenant_accounts()` |
 | `006_pr_cancel_from_draft.up.sql` | relaxes `pr_submitted_has_timestamp` so a draft can be cancelled without a submission that never happened — see *Decisions* |
 
-Backend packages as of Phase 6:
+Backend packages as of Phase 7:
 
 | Package | Contents |
 |---|---|
@@ -94,10 +179,11 @@ Backend packages as of Phase 6:
 | `internal/httpx` | the §9.8 error envelope (`Fail`, `FailWith`, `Unauthenticated`), the §9.0 list contract (`ParseList`, `ListResponse`), and **`Numeric`** — the exact-decimal type every NUMERIC crosses the wire as |
 | **`internal/docnum`** | **`Allocate(tx, tenant, docType)`** — §8.1 numbering, in the caller's transaction. `AllocateAt` is the same thing with an explicit instant, which is how E5 can fail. Constants `PR` `PO` `GR` `JE` |
 | `internal/db` | pools, `WithTenant`, migrations, and `SQLState` / `IsUniqueViolation` / `ConstraintName` for mapping constraints to business outcomes |
-| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, the sixteen `/inventory/*` handlers, the twenty `/procurement/*` handlers, and the **two `/finance/*` handlers**. **`procurement_receipts.go` is §8.4** — the one handler that writes to three modules in one transaction — with its inventory and finance halves in **`inventory_receipt.go`** and **`finance_journal.go`**, both taking the same `tx`. **`finance.go` is the finance read side** and is the whole of §9.6 |
+| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, the sixteen `/inventory/*` handlers, the twenty `/procurement/*` handlers, the two `/finance/*` handlers, and **`dashboard.go` — the one route that spans modules**. **`procurement_receipts.go` is §8.4** — the one handler that writes to three modules in one transaction — with its inventory and finance halves in **`inventory_receipt.go`** and **`finance_journal.go`**, both taking the same `tx`. It now exports **`api.PostGoodsReceipt`**, the same transaction with the HTTP peeled off, which is what `cmd/seed` calls. **`finance.go` is the finance read side** and is the whole of §9.6 |
+| **`cmd/seed`** | §15's demo, in four files: **`data.go`** (the two tenants, seven users, master data — the specification transcribed), **`documents.go`** (one recipe of thirteen requisitions and eight adjustments, applied to both tenants by *index* into their own data), **`platform.go`** (the five RLS-free tables, on the erp_admin pool), **`tenant.go`** (everything else, in one `db.WithTenant` transaction per tenant on the erp_app pool), and **`ids.go`** (UUIDv5 from what a row *is* — the whole of the idempotency story) |
 | `testsupport` | `FakeVerifier`, `FakeUsers`, the shared HTTP `Harness` (used by both test packages), the fixtures, and `WithTenantOn` / `NoSuchTenant` |
 
-Frontend routes as of Phase 6: `/login` `/auth/action` `/` `/admin/tenants`
+Frontend routes as of Phase 7: `/login` `/auth/action` `/` `/admin/tenants`
 `/admin/tenants/new` `/admin/tenants/:id` `/settings/users` `/settings/users/new`
 `/settings/users/:id` `/inventory/products` `/inventory/products/new`
 `/inventory/products/:id` `/inventory/warehouses` `/inventory/stock`
@@ -116,6 +202,22 @@ inventory one to `/inventory/ledger?sourceId=<receipt id>`, the finance one to
 document. The `TODO(phase-6)` Phase 5 left in `ReceiveGoods.tsx` is gone, and
 there are no `TODO(phase-*)` markers left anywhere in `frontend/src` or
 `backend/internal`.
+
+**`/` is no longer the identity dump it was.** `pages/Dashboard.tsx` is gone;
+`pages/dashboard/` holds `DashboardPage` plus `WidgetCard`, `ApprovalQueue`,
+`LowStockCard`, and `RecentActivityCard`. The approve/reject decision happens on
+the dashboard itself for an approver, which is §10.7.1's "two-button decision
+between meetings".
+
+**What Phase 8 inherits from the responsive pass.**
+
+| Need | Use |
+|---|---|
+| A list that is a table on a desktop and cards on a phone | **`ResponsiveList`** (`components/ResponsiveList.tsx`). It owns the breakpoint switch, all four §10.7.6 states in *both* views, and the pagination. It does **not** own the cells: `row` and `card` are render props, for the same reason `TableHead` shares only the heading row |
+| The card itself | **`DocumentCard`** from `components/CardList.tsx` — number, caption, chip, label/value fields, footer. The card is not one big link, because several rows carry a second link and a link inside a link is invalid markup |
+| "Am I below `md`?" in JavaScript | **`useCompact()`**. Used only where a *genuinely different component* is needed (§10.7.4). Everything that is merely layout stays in Tailwind |
+| A dense grid that scrolls sideways | **`ScrollableTable`** + `TableHead sticky` + `{ sticky: true }` on the first column + **`frozenCell`** on the matching `<td>`, and `group` on the `<tr>` so the frozen cell follows the row's hover |
+| A form's primary action on a phone | **`StickyActions`**. `sticky`, not `fixed`, so nothing needs a spacer and nothing can hide behind it; `bottom-14` clears the tab bar |
 
 **What Phase 7 inherits from finance.** `GET /api/finance/journal-entries` takes
 `sourceId`, `accountId`, `sourceType`, `from`, `to`, and the §9.0 list parameters,
@@ -288,7 +390,24 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 | 2026-07-26 | The Finance page shows the **chart of accounts**, which §10.5 does not ask for | §9.6.1's completeness table marks Accounts *List* ✅ and says in as many words that "every ✅ above needs a working UI, not just an endpoint". Without it `GET /finance/accounts` would be an endpoint no screen calls and `listAccounts` a client function nothing imports — the same unused-symmetry problem that had `getGoodsReceipt`'s wrapper removed in Phase 5B. Two chips above the journal, each filtering it. |
 | 2026-07-26 | Accounts have no `?includeDeleted=true`, unlike every master-data list | The recycle bin exists because things get deleted. Nothing in the MVP deletes an account — there is no endpoint, and §9.6 says the chart is seeded rather than user-managed — so the parameter would be a view onto a state no code path produces. The column is still read (`deleted_at IS NULL`), because D8 soft-deletes `2150` by hand to prove the rollback. |
 | 2026-07-26 | **`SourceFilterNotice` extracted to `components/ListStates.tsx`**, and `LedgerPage` refactored onto it | The finance page's `?sourceId=` banner is the same twenty-five lines as the ledger's with one noun changed, and §4 sets the bar for abstracting at the second concrete use case — which this is, exactly as `MasterDataList` was for suppliers. The component owns the URL parameter as well as the markup: a version where the caller deleted `sourceId` itself would render a button whose behaviour lived in another file. |
-| 2026-07-26 | The local superadmin was provisioned by a throwaway, deleted after use, rather than by `cmd/seed` | Carried from Phase 3 — `/admin/*` had been unreachable by hand for three phases. Phase 7 owns the seed script and §3.5.3 already specifies the deterministic-UID shape it should take, so building it now would be doing that work twice and probably differently. The throwaway followed §3.3's order (provider account first, row second, compensating delete on failure); the account and the SQL are recorded below so the next person does not need the program. |
+| 2026-07-26 | The local superadmin was provisioned by a throwaway, deleted after use, rather than by `cmd/seed` | Carried from Phase 3 — `/admin/*` had been unreachable by hand for three phases. Phase 7 owns the seed script and §3.5.3 already specifies the deterministic-UID shape it should take, so building it now would be doing that work twice and probably differently. The throwaway followed §3.3's order (provider account first, row second, compensating delete on failure); the account and the SQL are recorded below so the next person does not need the program. **Superseded: `cmd/seed` now creates `super@erp.test`.** |
+| 2026-07-26 | **`/api/me`'s `moduleRoles` is now the EFFECTIVE map — what `LevelFor` resolves — not what `user_module_roles` stores. This was a bug, not a refinement** | A tenant admin correctly has *no* role rows (§5.4, B7), so the stored map is empty for them. `/api/me` sent that, and `AppShell`'s nav is driven straight off it — so Rina, the seed's Nusantara admin and the subject of acceptance step 10, signed in to a sidebar with no modules, no bottom tabs, and no way to reach a single screen, while every endpoint behind those links answered her perfectly. It survived four phases because the only account anybody signed in with by hand had explicit rows, which makes the two maps identical; B7 could not catch it because B7 asks whether an implicit admin gets *past the gate*, and she always did. `lib/levels.ts` already documented the contract the server was breaking: "the server intersected the user's levels with the tenant's entitlements and applied the implicit-admin rule before sending it." It had not. Fixed by routing through the same `effectiveRoles` the user-admin screens use, so there is one implementation of §5.4; **B13** is the test, and it fails on the old line. Found by the Phase 7 API pass, at exactly the place the deferral note said to expect it. |
+| 2026-07-26 | **`postGoodsReceipt` was extracted from its handler, and refusals became `*refusal` values** | §15 requires the seed's receipts to go "through `PostGoodsReceipt` rather than inserting ledger and journal rows directly — that way the seed exercises the same code path as the application and cannot drift from it", and §8.4's own note writes the signature. The seed has no `*fiber.Ctx`, so the business outcomes had to leave as errors. Rather than a second vocabulary, `validate.go` gained `notFoundError` / `stateConflictError` / `unprocessableError` / `malformedError` returning a `*refusal`, and the existing `notFound` / `stateConflict` / … became one-line wrappers that `write` one — so a code, a message, or a `details` payload cannot differ between "the endpoint refused" and "the function refused", and **every existing call site is unchanged**. Note the shape against Trap 1: a `*refusal` is a *real* error, so `if err != nil` fires on it; `httpx.Fail` still returns nil and only `write` calls it. The whole of Groups D and H — idempotency, over-receipt, the D8 rollback, both concurrency tests — passed unchanged, which is the evidence the extraction preserved the semantics. |
+| 2026-07-26 | The seed writes requisitions and purchase orders as **SQL**, and only the receipts through the application | Two reasons, and the first is the phase brief's: §15 singles out the receipt because it is the one event that writes to three modules at once, and a second implementation of *that* would be a second place atomicity could be wrong. A requisition is a document with no consequences beyond itself. The second reason is dates: §15 wants orders spread over sixty days with `expected_at` "a mix of past and future", and approval computes `expected_at` as **today** plus the supplier's lead time (§8.3) — so every seeded order would be expected next week and "overdue" could not be demonstrated at all. Numbers still come from `docnum.AllocateAt` dated at the document's own instant, so a requisition raised in June is `PR-202606-…` rather than filed under this month. |
+| 2026-07-26 | Goods receipts are dated **now**, while the orders behind them are historical | `PostGoodsReceipt` takes no timestamp, and giving it one would add a production seam for the seed's benefit — the opposite of the reasoning that justified `docnum.AllocateAt`, which exists because E5 *cannot fail* without a controllable clock. Here nothing fails without one. And the result is more realistic rather than less: orders placed across sixty days whose deliveries arrived recently is what a lead time looks like. The ledger still spans the window, because the twenty opening balances and eight manual adjustments per tenant do. |
+| 2026-07-26 | The seed upserts `tenants` on **slug** and `users` on **email**, taking the id the row actually has | Everything else uses a UUIDv5 derived from what it is, and conflicts on the id. These two cannot: a database that has been developed against already holds hand-made rows with ids nothing derived, and `ON CONFLICT (id)` collides with `tenants_slug_key` and aborts. It did, on the first run. Adopting the existing row means the seed can be run against a working database without destroying what is there — which is also why the Phase 2–3 scratch rows are still present and were not deleted. |
+| 2026-07-26 | `auth.Firebase` gained `EnsureSeedUser`, and it is deliberately **not** on the `UserManager` interface | §3.5.3's deterministic UIDs need `CreateUser` with an explicit UID, and `UserManager` is the interface the two provisioning *endpoints* reach the provider through. Adding "create an account at a UID of your choosing" to it would put that within reach of a request handler for the benefit of a build-time tool. `cmd/seed` depends on the concrete `*auth.Firebase` instead, which is the honest dependency. An address already belonging to a *different* UID is an error rather than a shrug: pressing on would write a `users` row whose `firebase_uid` names nothing, which is §3.3's whole failure mode. |
+| 2026-07-26 | The dashboard route carries **no `RequireModule`**, and a widget the caller cannot read is **absent** rather than empty | It is the only route below `/api` that spans modules: its four widgets answer to two of them, and a caller entitled to one must get that one rather than a 403 for the other. So the gate is inside, per widget, through the same `LevelFor` as everything else. Absent rather than empty is the load-bearing half — `{"lowStock":{"count":0}}` says "nothing is low", and telling somebody who cannot see Inventory that nothing is low is a lie the nav does not tell. A superadmin has no tenant and so gets `{}` rather than a 500. |
+| 2026-07-26 | "Open purchase orders" means **outstanding** — `open` *and* `partially_received` | `open` is a specific status in the naming contract, so this reading needed a decision. An order half of which has arrived is emphatically still an order somebody is waiting on, and a widget that dropped it the moment the first box landed would count down to zero while goods were in transit. The value is the whole ordered value, not the outstanding remainder: that is the commitment the company has made, which is the question a dashboard number answers. |
+| 2026-07-26 | The approval queue **keeps the caller's own submissions**, and the count includes them | Filtering them out is the tempting thing — C2 refuses self-approval for everybody — and it would make the count above the list disagree with the list itself. "3 awaiting approval" over two rows is a bug report waiting to be filed. The row carries `requestedById`, the screen compares it with `me.user.id` and disables its own buttons with the reason, and the server refuses regardless (I12). Same for a requisition with no supplier: the queue has nowhere to pick one, so the row says to open it. |
+| 2026-07-26 | `lowStockFrom` / `lowStockSelect` and `ledgerSelect` / `ledgerFrom` were extracted, so the widget and the list ask one question | The widget says "4 products are low" and links to a list that must show four rows; two copies of "below reorder point" is how one gains a clause and the pair silently stops agreeing. **L4 asserts the widget's count equals the list's total**, which is a test about drift rather than about arithmetic. The ledger projection was already an exact duplicate between `listLedger` and `ledgerEntry` before the widget made it a third. |
+| 2026-07-26 | The low-stock shortcut carries **quantities** in the URL: `?products=<id>:<qty>` | §10.2 asks only that the shortcut "pre-fills them", and ids alone would satisfy that — but a requisition for one unit of something short by forty is a shortcut that produces a wrong document. The quantity is the shortfall PostgreSQL computed, and putting it in the URL keeps the link a link (copyable, bookmarkable, no second request) and needs no Inventory access on a Procurement form. Nothing is decided by it: it is what the box is pre-filled with, and the server validates whatever is finally sent. |
+| 2026-07-26 | Card transformation uses **`useCompact()`**, a media-query hook, rather than `md:hidden` | §10.7.4: "render a genuinely different component below the breakpoint rather than CSS-hiding cells — a `<td>` styled to look like a card still announces as a table cell." The mirror image is just as bad: rendering both and hiding one puts every row in the accessibility tree twice, and a screen reader reads the invisible copy. `useSyncExternalStore` rather than an effect, so the first render already knows and no phone paints the desktop table for a frame. Everything that is *merely* layout stays in Tailwind. |
+| 2026-07-26 | Cards for the two **document** lists; frozen first column for the two **grids** | §10.7.4 says choose per screen and be able to say why. Requisitions and orders are read one row at a time, in modest numbers, and are what §10.7.1 puts on a phone. The stock grid and the ledger exist for horizontal comparison across many columns, and a stack of cards throws exactly that away — so they scroll sideways with the row's identity pinned. The frozen cell needs an *opaque* background and therefore has to follow the row's hover, which is what `group-hover` on `frozenCell` is for; and the header wins the z-index collision §10.7.4 warns about, because the header is what says what the frozen column *is*. |
+| 2026-07-26 | `ScrollableTable` uses `overflow-auto` with a max height, not `overflow-x-auto` | A container with `overflow-x: auto` computes `overflow-y` to `auto` as well, so it is already a scroll container and a `sticky top-0` header inside it stops tracking the page. Making both axes explicit and capping the height puts the sticky header and the frozen column in the same scroll box, which is the only way the two work at once. The cap only bites when there are more rows than fit. |
+| 2026-07-26 | `StickyActions` is `sticky`, not `fixed` | A sticky element keeps its place in the flow, so nothing needs a spacer underneath and nothing can end up hidden behind it — the two bugs a fixed bar produces. `bottom-14` clears the bottom tab bar. |
+| 2026-07-26 | **The touch-target audit found four real failures**, one of which had a comment claiming otherwise | `ThemeToggle` was ~26px, the `SourceFilterNotice` clear button and the two sign-in mode buttons had no height at all, and the toast dismiss carried the comment "`-m-2 p-2` keeps the 44px target of §10.7.5" while measuring about 36px. That last one is the useful lesson: a comment asserting a measurement is not a measurement. `inputmode` needed no work — every quantity and money field already had it from Phases 4–5. |
+| 2026-07-26 | `ResponsiveList` was extracted, and clone groups fell from **8 to 1** | The Phase 6 log named the target — "the pagination-and-empty-state block still wants a `DataTable` wrapper" — and the card transformation is what made it worth building: a second view doubled the scaffolding, and `fallow audit` reported the two screens as a 28-line and a 22-line clone the moment the second copy landed. What it does *not* own is the cells and the card fields: `row` and `card` are render props, for the same reason `TableHead` shares only the heading row. The one remaining clone group is the inherited pagination block on the two grids, which are not card-transformed and so do not use it. |
 
 ---
 
@@ -1357,3 +1476,152 @@ walked without**), the four dashboard widgets, and the twenty-five-step
 acceptance test at 360px in both themes, which is also the first browser
 walkthrough of nearly every screen in this application. Budget for finding
 things, not for confirming them.
+
+---
+
+## Phase 7 — 2026-07-26
+
+**Done:** all three build parts. The MVP gate itself is **not** crossed — see
+below.
+
+**Part 1, the dashboard.** `GET /api/dashboard/summary` (§9.7) and the four
+§10.2 widgets. It is the only route below `/api` that spans modules, so it
+carries no `RequireModule` and gates per widget inside, through `LevelFor`; a
+widget the caller cannot read is *absent from the response*, not present and
+empty. `/` is no longer the identity dump it was: `pages/dashboard/` holds the
+page plus `WidgetCard`, `ApprovalQueue`, `LowStockCard`, and
+`RecentActivityCard`, and an approver decides requisitions from the dashboard
+itself — §10.7.1's "two-button decision between meetings". The low-stock widget's
+"Create requisition" links to `/procurement/requisitions/new?products=<id>:<qty>`
+with the shortfall PostgreSQL computed already in the boxes.
+
+**Part 2, the seed.** `cmd/seed`, in five files, producing §15 exactly: two
+tenants with different entitlements and different timezones, seven users plus the
+platform superadmin, ~30 ledger rows per tenant across the preceding 60 days,
+13 requisitions and the 6 orders their approvals produced, and 4 goods receipts
+that each wrote stock ledger rows *and* a balanced journal entry in the same
+transaction. It is idempotent by construction — every row's UUID is derived from
+what the row is — and it verifies itself on every run: the §15 document counts,
+"at least 3 products below reorder point", and that every receipt has both a
+ledger entry and a balanced journal entry behind it.
+
+The receipts go through **`api.PostGoodsReceipt`**, which §15 requires and which
+needed the handler split at the HTTP boundary. That is the one structural change
+this phase made to shipped code, and Groups D and H passing unchanged is the
+evidence it preserved the semantics.
+
+**Part 3, the responsive pass.** Card transformation on the requisition and PO
+lists, through a real media-query hook rather than `md:hidden`; frozen first
+column plus sticky header on the stock and ledger grids; sticky bottom action
+bars on the receipt and requisition forms; and a touch-target audit that found
+four real failures. `inputmode="decimal"` needed no work — every quantity field
+already had it. `ResponsiveList` was extracted at the end and clone groups fell
+from 8 to 1.
+
+**Tests green:** the whole suite, `go test ./... -p 1`. Groups A–L, with **Group
+L new this phase** (7 tests, `internal/api/dashboard_test.go`) and **B13 added**
+to Group B. Frontend builds clean; `oxlint` reports the same 4 pre-existing
+fast-refresh warnings and nothing new.
+
+- **L1** — the four widgets are filtered by module *individually*: a
+  procurement-only user gets two widgets and not an empty stock panel. Plus the
+  unentitled-module case (Agus) and the superadmin case, which must be `{}` and
+  not a 500.
+- **L2** — the count is everybody's, the queue is the approver's, and the
+  approver's *own* submissions stay in both. The test then confirms the server
+  still answers `self_approval_forbidden`, which is what makes the row's presence
+  cosmetic rather than a hole.
+- **L3** — "open" counts `partially_received` too, and the value is the ordered
+  value.
+- **L4 — the one worth reading.** The widget's count and
+  `GET /inventory/stock/low`'s total must be the same number. It is a test about
+  two queries not drifting, which is why they share `lowStockFrom`; the scenario
+  includes all three edge cases of the rule (exactly at the point, no point set,
+  no ledger rows at all).
+- **L5** — the last fifteen, newest first, with a real receipt posted through the
+  real endpoint so the top row's `sourceNumber` is a resolved GR number rather
+  than a UUID.
+- **L6** — two tenants, twice as much next door, and every widget counts only its
+  own. Every widget query is a bare aggregate; RLS is the only thing scoping
+  them, and this is the test that says so.
+- **B13** — `/api/me` reports the *effective* level. See below.
+
+**Verified beyond the suite:**
+
+- **Seed idempotency at content level.** An md5 over every requisition, order,
+  receipt, journal entry, journal line, ledger row, and product is byte-identical
+  across three consecutive `make seed` runs. Row counts are unchanged and
+  `document_sequences` burns no numbers on a re-run.
+- **26 acceptance-test assertions driven with real Firebase ID tokens** for all
+  eight seeded accounts, against the real API: steps 1, 2, 3, 4, 5, 7, 10, 16,
+  24, and 25 in full, plus "each seeded user sees a different set of widgets".
+  All pass. Kept deliberately read-only so the browser walk starts from a clean
+  seed.
+
+**Deviations from spec:** fifteen, all recorded in *Decisions taken*. The three
+that matter most: `/api/me` now sends the effective role map rather than the
+stored one (a **bug fix**, see below); the seed writes requisitions and orders as
+SQL while only the receipts go through the application, because §15 singles out
+the receipt and because approval can only date `expected_at` as today-plus-lead;
+and the dashboard route carries no `RequireModule`, gating per widget instead.
+
+**The bug this phase found.** `/api/me`'s `moduleRoles` was the map *stored* in
+`user_module_roles`, and a tenant admin correctly has no rows there (§5.4). The
+sidebar, the bottom tabs, and `holds()` are all driven off that map — so Rina,
+the seed's Nusantara admin and the subject of acceptance step 10, signed in to an
+application with no navigation at all, while every endpoint behind the missing
+links answered her requests perfectly. It survived four phases because the only
+account used by hand had explicit rows, which makes the two maps identical, and
+because B7 asks whether an implicit admin gets *past the gate* — she always did.
+`lib/levels.ts` had documented the contract the server was breaking the whole
+time. B13 is the test; it fails on the old line.
+
+**TODO(post-mvp) markers added:** none. The standing list is still exactly two:
+
+- `backend/internal/api/procurement_receipts.go` — audit `gr.posted` (§8.4
+  step 7), in `postGoodsReceipt` after step 6.
+- `frontend/src/lib/requisitionForm.ts` — replace the product `<select>` with a
+  search-as-you-type picker.
+
+**`npx fallow audit` run:** yes, as `discipline.md` asks at the end of Phase 7.
+Clone groups **8 → 1**; the survivor is the inherited pagination block shared by
+`LedgerPage` and `StockGrid`, which are not card-transformed and so do not use
+`ResponsiveList`. Dead code: 2 unused type exports, both inherited from Phase 6
+(`Account`, `JournalEntry`). Complexity: `OrderList` (162 lines) and
+`RequisitionList` (143) are still flagged, and further splitting would fragment a
+page component for a metric's sake — the render props are what keep the cells
+next to the screen that owns them.
+
+**Known broken / left half-done:**
+
+- **THE MVP GATE IS NOT CROSSED.** All twenty-five steps hold at the API, but the
+  gate is what a person sees: whether a control is rendered or hidden (I12 makes
+  hiding cosmetic, so the API cannot tell the two apart), the 360px layout, both
+  themes, whether links go where they claim, and the copy. That walk is
+  [`phases/phase-7.5-acceptance-walk.md`](phases/phase-7.5-acceptance-walk.md).
+  **Do not start Phase 8 until it is done.**
+- **Nothing built this phase has been seen in a browser**, including the four
+  widgets, the card view, the frozen columns, and the sticky bars. Two things are
+  worth looking at first because they have no precedent to copy: `StickyActions`
+  where it meets the bottom tab bar (`bottom-14` is measured from the tab bar's
+  `min-h-14`, and a screen with fewer than two tabs has no tab bar, which leaves
+  the action bar floating 56px up), and the frozen first column on the ledger,
+  where "When" is a wide value to pin on a 360px screen.
+- **The `md` sidebar tier of §10.7.3 is still not built.** That section describes
+  three tiers — persistent at `lg`, "collapses to icons, expands on hover" at
+  `md`, drawer below — and the app has two: drawer below `lg`, persistent above.
+  Left as it is deliberately, because §10.7.5 says "no hover-only actions,
+  anywhere" and an expands-on-hover sidebar is exactly that. Worth resolving in
+  the docs rather than in the code.
+- **Still no frontend tests at all.** §12.5 defines them; Phase 8 is where they
+  live. `ResponsiveList`, `useCompact`, and `prefillLines` are the three new
+  things most worth having them.
+- `go test -race` still cannot run here — no C toolchain on `PATH`. CI runs it.
+- Scratch rows from Phases 2–3 are still in the local database, deliberately —
+  see *Current state* for what they are and the SQL to remove them.
+
+**Next:** [`phases/phase-7.5-acceptance-walk.md`](phases/phase-7.5-acceptance-walk.md),
+in a new session. It is the browser walk and nothing else: the twenty-five steps
+ordered to minimise sign-ins, with the API half already confirmed, so what is
+being checked is the screen. Record what it finds under a `## Phase 7.5` block
+here. Only then is the MVP done, and only then does Phase 8 exist.

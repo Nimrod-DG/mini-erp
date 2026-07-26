@@ -148,9 +148,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               type="button"
               onClick={() => dismiss(toast.id)}
               aria-label="Dismiss"
-              // -m-2 p-2 keeps the 44px target of §10.7.5 without the glyph
-              // pushing the toast taller than its text needs.
-              className="-m-2 shrink-0 p-2 text-secondary hover:text-primary"
+              // A declared 44×44 rather than padding around a glyph. The
+              // previous `-m-2 p-2` claimed the §10.7.5 target in its comment
+              // and delivered about 36px — the Phase 7 audit measured it. The
+              // negative margin still keeps the button from making the toast
+              // taller than its text needs.
+              className="-my-3 -mr-2 grid size-11 shrink-0 place-items-center text-secondary hover:text-primary"
             >
               <span aria-hidden="true">✕</span>
             </button>

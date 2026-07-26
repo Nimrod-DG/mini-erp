@@ -86,6 +86,13 @@ func New(deps Deps) *fiber.App {
 
 	api.Get("/me", Me)
 
+	// §9.7. Deliberately NOT behind a RequireModule: its four widgets answer to
+	// two different modules, so a caller entitled to one of them must get that
+	// one rather than a 403 for the other. The per-widget gate is inside the
+	// handler, through the same LevelFor every other check goes through, and a
+	// widget the caller cannot read is absent from the response entirely.
+	api.Get("/dashboard/summary", s.getDashboardSummary)
+
 	// The platform plane (§5.7). TenantTx above passes straight through for a
 	// superadmin, who has no tenant to scope to, so these handlers reach the
 	// erp_admin pool directly — which is revoked from every tenant business

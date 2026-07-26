@@ -5,7 +5,9 @@ import { AppShell } from "../../components/AppShell";
 import {
   EmptyState,
   ErrorNotice,
+  frozenCell,
   Pagination,
+  ScrollableTable,
   SkeletonRows,
   SourceFilterNotice,
   TableHead,
@@ -180,11 +182,16 @@ export function LedgerPage() {
         <ErrorNotice error={state.error} onRetry={reload} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+          {/* Horizontal scroll with a frozen first column, not cards (§10.7.4).
+              A ledger is read by scanning down the times and across to what
+              changed, and the moment is what identifies the row — so it is the
+              moment that stays put while the rest scrolls under it. */}
+          <ScrollableTable>
             <table className="w-full min-w-[48rem] text-left text-sm">
               <TableHead
+                sticky
                 columns={[
-                  { label: "When" },
+                  { label: "When", sticky: true },
                   { label: "Product" },
                   { label: "Warehouse" },
                   { label: "Change", align: "right" },
@@ -208,9 +215,9 @@ export function LedgerPage() {
                   {state.data.data.map((entry) => (
                     <tr
                       key={entry.id}
-                      className="border-t border-hairline hover:bg-raised"
+                      className="group border-t border-hairline hover:bg-raised"
                     >
-                      <td className="px-3 py-3 text-secondary">
+                      <td className={`px-3 py-3 text-secondary ${frozenCell}`}>
                         {formatDateTime(entry.occurredAt, timezone)}
                       </td>
                       <td className="px-3 py-3">
@@ -263,7 +270,7 @@ export function LedgerPage() {
                 </tbody>
               )}
             </table>
-          </div>
+          </ScrollableTable>
 
           {state.status === "ready" && (
             <Pagination

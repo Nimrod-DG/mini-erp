@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
 import { ErrorNotice } from "../../components/ListStates";
+import { StickyActions } from "../../components/StickyActions";
 import { useToast } from "../../components/Toasts";
 import { createRequisition, submitRequisition } from "../../lib/api";
 import {
   emptyLine,
+  prefillLines,
   usableLines,
   useRequisitionPickers,
   type RequisitionFormValues,
@@ -26,11 +28,20 @@ export function RequisitionNew() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [values, setValues] = useState<RequisitionFormValues>({
-    warehouseId: "",
-    supplierId: "",
-    notes: "",
-    lines: [{ ...emptyLine }],
+  // `?products=<id>:<qty>,…` is the dashboard's low-stock shortcut (§10.2). Read
+  // once, into the initial state, rather than watched: this pre-fills a form the
+  // user then edits, and re-reading the URL would undo their edits every render.
+  const [params] = useSearchParams();
+  const [values, setValues] = useState<RequisitionFormValues>(() => {
+    const prefilled = prefillLines(params.get("products"));
+    return {
+      warehouseId: "",
+      supplierId: "",
+      notes: "",
+      // One blank line when nothing was pre-filled: an empty form still needs a
+      // row to type into.
+      lines: prefilled.length > 0 ? prefilled : [{ ...emptyLine }],
+    };
   });
   const [saving, setSaving] = useState(false);
 
@@ -101,34 +112,39 @@ export function RequisitionNew() {
           onChange={setValues}
         />
 
-        <div className="flex flex-wrap gap-3">
-          {/* Disabled rather than refused when there is nothing to order: an
-              empty requisition is a form that is not finished, not a mistake to
-              report. The server refuses it too, with `empty_requisition` (C1) —
-              this is the cosmetic half (I12). */}
-          <button
-            type="button"
-            disabled={saving || incomplete || nothingToOrder}
-            onClick={() => void save(true)}
-            className="min-h-11 rounded-md bg-accent px-4 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Submit for approval"}
-          </button>
-          <button
-            type="submit"
-            disabled={saving || incomplete}
-            className="min-h-11 rounded-md border border-hairline px-4 text-sm disabled:opacity-50"
-          >
-            Save as draft
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/procurement/requisitions")}
-            className="min-h-11 rounded-md border border-hairline px-4 text-sm"
-          >
-            Cancel
-          </button>
-        </div>
+        {/* §10.7.5's sticky bar. A requisition with six lines is longer than a
+            phone screen, and the three choices at the end of it are the point of
+            the form. */}
+        <StickyActions>
+          <div className="flex flex-wrap gap-3">
+            {/* Disabled rather than refused when there is nothing to order: an
+                empty requisition is a form that is not finished, not a mistake to
+                report. The server refuses it too, with `empty_requisition` (C1) —
+                this is the cosmetic half (I12). */}
+            <button
+              type="button"
+              disabled={saving || incomplete || nothingToOrder}
+              onClick={() => void save(true)}
+              className="min-h-11 grow rounded-md bg-accent px-4 text-sm font-medium text-white disabled:opacity-50 sm:grow-0"
+            >
+              {saving ? "Saving…" : "Submit for approval"}
+            </button>
+            <button
+              type="submit"
+              disabled={saving || incomplete}
+              className="min-h-11 grow rounded-md border border-hairline px-4 text-sm disabled:opacity-50 sm:grow-0"
+            >
+              Save as draft
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/procurement/requisitions")}
+              className="min-h-11 rounded-md border border-hairline px-4 text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </StickyActions>
       </form>
     </AppShell>
   );
