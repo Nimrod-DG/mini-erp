@@ -36,6 +36,10 @@ type AuthContextValue = AuthState & {
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   sendReset: (email: string) => Promise<void>;
+  /** Re-read /api/me for the current session. Call it after changing something
+   *  /api/me reports about the signed-in user — their tenant role or their
+   *  module levels — because the whole navigation is derived from it. */
+  refreshMe: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -113,9 +117,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Authorization is resolved from the database on every request (I9), so the
+  // server is never stale — but the *navigation* is built from one /api/me read
+  // taken at sign-in. Change your own role and the sidebar, the bottom tabs and
+  // the role badges all keep describing who you were until the page is reloaded
+  // by hand: a Users link that 403s is the visible symptom.
+  //
+  // Guarded by the same generation counter as the listener above, so a refresh
+  // resolving after a sign-out cannot reinstate a signed-in user, and written
+  // through a state updater so it is a no-op unless we are still signed in.
+  const refreshMe = useCallback(async () => {
+    const current = generation.current;
+    try {
+      const me = await getMe();
+      if (generation.current !== current) return;
+      setState((previous) =>
+        previous.status === "signedIn" ? { status: "signedIn", me } : previous,
+      );
+    } catch {
+      // A failed refresh leaves the last known identity in place. The screen
+      // still works, and the next real request surfaces the actual problem —
+      // signing someone out over a background refetch would be the worse bug.
+    }
+  }, []);
+
   const value = useMemo(
-    () => ({ ...state, signIn, signOut, sendReset }),
-    [state, signIn, signOut, sendReset],
+    () => ({ ...state, signIn, signOut, sendReset, refreshMe }),
+    [state, signIn, signOut, sendReset, refreshMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

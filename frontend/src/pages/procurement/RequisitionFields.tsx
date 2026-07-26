@@ -34,8 +34,8 @@ export function RequisitionFields({
     <>
       {warehouses.length === 0 && (
         <p className="rounded-lg border border-warning/40 bg-surface p-4 text-sm text-warning">
-          There are no warehouses yet. Goods have to be received somewhere, so add
-          one under Inventory first.
+          There are no warehouses yet. Goods have to be received somewhere, so
+          add one under Inventory first.
         </p>
       )}
 
@@ -77,8 +77,8 @@ export function RequisitionFields({
               ))}
             </select>
             <span className="mt-1 block text-xs text-secondary">
-              Optional now, required to approve — an order has to be addressed to
-              somebody.
+              Optional now, required to approve — an order has to be addressed
+              to somebody.
             </span>
           </label>
         </div>
@@ -87,7 +87,9 @@ export function RequisitionFields({
           <span className={label}>Notes</span>
           <textarea
             value={values.notes}
-            onChange={(event) => onChange({ ...values, notes: event.target.value })}
+            onChange={(event) =>
+              onChange({ ...values, notes: event.target.value })
+            }
             rows={2}
             className="w-full rounded-md border border-hairline bg-surface px-3 py-2 text-sm"
             placeholder="Why this is needed, or anything the approver should know."
@@ -99,80 +101,12 @@ export function RequisitionFields({
         <h2 className="text-sm font-medium">Lines</h2>
 
         <div className="space-y-3">
-          {lines.map((line, index) => (
-            <div
-              key={index}
-              className="grid gap-3 sm:grid-cols-[1fr_6rem_8rem_auto] sm:items-end"
-            >
-              <label className="block">
-                <span className={label}>Product</span>
-                <select
-                  value={line.productId}
-                  onChange={(event) =>
-                    setLines(
-                      lines.map((current, i) =>
-                        i === index
-                          ? { ...current, productId: event.target.value }
-                          : current,
-                      ),
-                    )
-                  }
-                  className={field}
-                >
-                  <option value="">Choose a product…</option>
-                  {products.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.sku} — {product.name}
-                    </option>
-                  ))}
-                  {/* A line naming a product the picker filtered out — one that
-                      has been discontinued since the draft was written — keeps
-                      its option, or editing anything else on the draft would
-                      silently change what was ordered. */}
-                  {line.productId !== "" &&
-                    !products.some((product) => product.id === line.productId) && (
-                      <option value={line.productId}>
-                        (no longer in the catalogue)
-                      </option>
-                    )}
-                </select>
-              </label>
-
-              <label className="block">
-                <span className={label}>Quantity</span>
-                <input
-                  inputMode="decimal"
-                  value={line.qty}
-                  onChange={(event) =>
-                    setLines(
-                      lines.map((current, i) =>
-                        i === index ? { ...current, qty: event.target.value } : current,
-                      ),
-                    )
-                  }
-                  className={`${field} tabular`}
-                />
-              </label>
-
-              <label className="block">
-                <span className={label}>Unit cost</span>
-                <input
-                  inputMode="decimal"
-                  value={line.estUnitCost}
-                  onChange={(event) =>
-                    setLines(
-                      lines.map((current, i) =>
-                        i === index
-                          ? { ...current, estUnitCost: event.target.value }
-                          : current,
-                      ),
-                    )
-                  }
-                  placeholder={costFor(line, products) || "standard cost"}
-                  className={`${field} tabular`}
-                />
-              </label>
-
+          {lines.map((line, index) => {
+            // Rendered twice, and exactly one of the two is ever displayed: the
+            // header owns it while the fields are stacked, the grid owns it once
+            // they are a row. Sharing the element keeps the disabled rule and the
+            // label from drifting apart.
+            const remove = (
               <button
                 type="button"
                 aria-label={`Remove line ${index + 1}`}
@@ -182,8 +116,103 @@ export function RequisitionFields({
               >
                 Remove
               </button>
-            </div>
-          ))}
+            );
+
+            return (
+              <div
+                key={index}
+                // Below `sm` the four controls stack, and consecutive lines run
+                // together with nothing to say where one ends — on a 360px screen
+                // a three-line requisition is one undifferentiated column. The
+                // card and its header are that boundary. From `sm` the grid puts
+                // the line back on a single row and both disappear, because a
+                // heading per row would be noise once the row reads as a row.
+                className="rounded-md border border-hairline p-3 sm:rounded-none sm:border-0 sm:p-0"
+              >
+                <div className="mb-3 flex items-center justify-between gap-3 sm:hidden">
+                  <span className="text-sm font-medium">Line {index + 1}</span>
+                  {remove}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-[1fr_6rem_8rem_auto] sm:items-end">
+                  <label className="block">
+                    <span className={label}>Product</span>
+                    <select
+                      value={line.productId}
+                      onChange={(event) =>
+                        setLines(
+                          lines.map((current, i) =>
+                            i === index
+                              ? { ...current, productId: event.target.value }
+                              : current,
+                          ),
+                        )
+                      }
+                      className={field}
+                    >
+                      <option value="">Choose a product…</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.sku} — {product.name}
+                        </option>
+                      ))}
+                      {/* A line naming a product the picker filtered out — one that
+                      has been discontinued since the draft was written — keeps
+                      its option, or editing anything else on the draft would
+                      silently change what was ordered. */}
+                      {line.productId !== "" &&
+                        !products.some(
+                          (product) => product.id === line.productId,
+                        ) && (
+                          <option value={line.productId}>
+                            (no longer in the catalogue)
+                          </option>
+                        )}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className={label}>Quantity</span>
+                    <input
+                      inputMode="decimal"
+                      value={line.qty}
+                      onChange={(event) =>
+                        setLines(
+                          lines.map((current, i) =>
+                            i === index
+                              ? { ...current, qty: event.target.value }
+                              : current,
+                          ),
+                        )
+                      }
+                      className={`${field} tabular`}
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className={label}>Unit cost</span>
+                    <input
+                      inputMode="decimal"
+                      value={line.estUnitCost}
+                      onChange={(event) =>
+                        setLines(
+                          lines.map((current, i) =>
+                            i === index
+                              ? { ...current, estUnitCost: event.target.value }
+                              : current,
+                          ),
+                        )
+                      }
+                      placeholder={costFor(line, products) || "standard cost"}
+                      className={`${field} tabular`}
+                    />
+                  </label>
+
+                  <div className="hidden sm:block">{remove}</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -204,8 +233,8 @@ export function RequisitionFields({
 
         <p className="text-xs text-secondary">
           One line per product. Leave the unit cost blank to use the product's
-          standard cost — the estimate becomes the order's price, and from there the
-          value posted to Inventory and Finance when the goods arrive.
+          standard cost — the estimate becomes the order's price, and from there
+          the value posted to Inventory and Finance when the goods arrive.
         </p>
       </section>
     </>

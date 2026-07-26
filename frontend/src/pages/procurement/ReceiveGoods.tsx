@@ -192,8 +192,8 @@ function ReceiveForm({
         </Link>
       }
     >
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="space-y-6">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-6">
           <section className="overflow-x-auto rounded-lg border border-hairline bg-surface">
             <table className="w-full min-w-[40rem] text-left text-sm">
               <caption className="px-3 pt-3 text-left text-sm font-medium">
@@ -234,7 +234,7 @@ function ReceiveForm({
           </label>
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <section className="rounded-lg border border-hairline bg-surface p-5">
             <h2 className="mb-3 text-sm font-medium">This will</h2>
             <ul className="space-y-2 text-sm text-secondary">

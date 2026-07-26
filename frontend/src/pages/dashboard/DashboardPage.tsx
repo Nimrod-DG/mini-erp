@@ -68,52 +68,70 @@ export function DashboardPage() {
         // One column on a phone, two from `lg`. Not three: the approval queue and
         // the activity feed are both tall, and a third column would make every
         // card narrow enough that the queue's two buttons stack.
-        <div className="grid items-start gap-4 lg:grid-cols-2">
-          {summary.openOrders && (
-            <WidgetCard title="Open purchase orders" href="/procurement/orders">
-              <WidgetFigure
-                value={String(summary.openOrders.count)}
-                caption={
-                  summary.openOrders.count === 1
-                    ? "order still expecting goods"
-                    : "orders still expecting goods"
-                }
+        //
+        // The two columns are independent flex stacks rather than four cards in a
+        // `grid-cols-2`, because a grid aligns rows: the queue and the activity
+        // feed are several times taller than the two figure cards beside them, so
+        // every short card left a row-height hole underneath it. `items-start`
+        // stops the card *stretching* but cannot reclaim the row's height — only
+        // separate columns can, and masonry is not yet something to ship.
+        //
+        // The cost is that the phone order becomes column-major: open orders, low
+        // stock, then the queue. Interleaving on a phone *and* packing on a desktop
+        // cannot both come out of one DOM order.
+        <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:items-start">
+          <div className="flex flex-col gap-4">
+            {summary.openOrders && (
+              <WidgetCard
+                title="Open purchase orders"
+                href="/procurement/orders"
+              >
+                <WidgetFigure
+                  value={String(summary.openOrders.count)}
+                  caption={
+                    summary.openOrders.count === 1
+                      ? "order still expecting goods"
+                      : "orders still expecting goods"
+                  }
+                />
+                {summary.openOrders.count === 0 ? (
+                  <WidgetEmpty>Nothing is on order.</WidgetEmpty>
+                ) : (
+                  <p className="mt-4 text-sm text-secondary">
+                    Worth{" "}
+                    <span className="tabular text-primary">
+                      {formatMoney(summary.openOrders.totalValue)}
+                    </span>{" "}
+                    in total.
+                  </p>
+                )}
+              </WidgetCard>
+            )}
+
+            {summary.lowStock && (
+              <LowStockCard
+                widget={summary.lowStock}
+                canRaise={holds(me.moduleRoles, "procurement", "user")}
               />
-              {summary.openOrders.count === 0 ? (
-                <WidgetEmpty>Nothing is on order.</WidgetEmpty>
-              ) : (
-                <p className="mt-4 text-sm text-secondary">
-                  Worth{" "}
-                  <span className="tabular text-primary">
-                    {formatMoney(summary.openOrders.totalValue)}
-                  </span>{" "}
-                  in total.
-                </p>
-              )}
-            </WidgetCard>
-          )}
+            )}
+          </div>
 
-          {summary.pendingApprovals && (
-            <ApprovalQueue
-              widget={summary.pendingApprovals}
-              meId={me.user.id}
-              onDecided={reload}
-            />
-          )}
+          <div className="flex flex-col gap-4">
+            {summary.pendingApprovals && (
+              <ApprovalQueue
+                widget={summary.pendingApprovals}
+                meId={me.user.id}
+                onDecided={reload}
+              />
+            )}
 
-          {summary.lowStock && (
-            <LowStockCard
-              widget={summary.lowStock}
-              canRaise={holds(me.moduleRoles, "procurement", "user")}
-            />
-          )}
-
-          {summary.recentActivity && me.tenant && (
-            <RecentActivityCard
-              widget={summary.recentActivity}
-              timezone={me.tenant.timezone}
-            />
-          )}
+            {summary.recentActivity && me.tenant && (
+              <RecentActivityCard
+                widget={summary.recentActivity}
+                timezone={me.tenant.timezone}
+              />
+            )}
+          </div>
         </div>
       )}
     </AppShell>

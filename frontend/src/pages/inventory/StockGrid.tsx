@@ -96,7 +96,12 @@ export function StockGrid() {
               stack of cards throws that away — whereas a row of quantities whose
               SKU has scrolled out of sight is numbers about nothing. */}
           <ScrollableTable>
-            <table className="w-full min-w-[34rem] text-left text-sm">
+            <table className="w-full min-w-[28rem] table-fixed text-left text-sm sm:min-w-[34rem]">
+              <colgroup>
+                <col className="w-44 sm:w-60" />
+                <col className="w-36 sm:w-40" />
+                <col className="w-28 sm:w-32" />
+              </colgroup>
               <TableHead
                 sticky
                 columns={[
@@ -124,25 +129,25 @@ export function StockGrid() {
                       key={`${cell.productId}:${cell.warehouseId}`}
                       className="group border-t border-hairline hover:bg-raised"
                     >
-                      <td className={`px-3 py-3 ${frozenCell}`}>
+                      <td className={`px-3 py-3 align-top ${frozenCell}`}>
                         <Link
                           to={`/inventory/products/${cell.productId}`}
-                          className="tabular underline decoration-hairline underline-offset-2"
+                          className="tabular break-words underline decoration-hairline underline-offset-2"
                         >
                           {cell.sku}
                         </Link>
-                        <div className="text-xs text-secondary">
+                        <div className="break-words text-xs text-secondary">
                           {cell.productName}
                           {cell.productDeleted && " (deleted)"}
                         </div>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 align-top">
                         <span className="tabular">{cell.warehouseCode}</span>
-                        <div className="text-xs text-secondary">
+                        <div className="break-words text-xs text-secondary">
                           {cell.warehouseName}
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-right">
+                      <td className="px-3 py-3 text-right align-top">
                         <span className="tabular">
                           {formatQty(cell.qtyOnHand)}
                         </span>{" "}

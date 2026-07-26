@@ -283,7 +283,7 @@ export function AppShell({
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="flex min-w-0 w-full flex-wrap items-center gap-3 sm:ml-auto sm:w-auto sm:flex-nowrap">
           <RoleBadges me={me} />
           <span className="hidden text-sm text-secondary md:inline">
             {me.user.fullName}
@@ -329,8 +329,10 @@ export function AppShell({
           key={location.pathname}
           className="min-w-0 flex-1 px-4 pb-20 pt-6 sm:px-6 md:pb-6"
         >
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-xl font-semibold">{title}</h1>
+          <div className="mb-6 flex min-w-0 flex-wrap items-center justify-between gap-3">
+            <h1 className="min-w-0 break-words text-xl font-semibold">
+              {title}
+            </h1>
             {actions}
           </div>
           {children}

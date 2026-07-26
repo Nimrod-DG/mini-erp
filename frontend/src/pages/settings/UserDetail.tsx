@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { AppShell } from "../../components/AppShell";
 import { ErrorNotice } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
-import { useMe } from "../../hooks/useAuth";
+import { useAuth, useMe } from "../../hooks/useAuth";
 import {
   ApiError,
   getTenantUser,
@@ -59,6 +59,7 @@ function sameMatrix(a: Matrix, b: Matrix): boolean {
 export function UserDetailPage() {
   const { id = "" } = useParams();
   const me = useMe();
+  const { refreshMe } = useAuth();
   const { state, reload } = useAsync(`user:${id}`, () => getTenantUser(id));
 
   const [user, setUser] = useState<TenantUserDetail | null>(null);
@@ -87,6 +88,15 @@ export function UserDetailPage() {
       setUser(next);
       setOverride(null);
       setSaved(true);
+
+      // Editing your own row changes your own navigation. Every mutation on this
+      // page goes through here, so this is the one place that has to notice —
+      // and it has to be `next.id`, not the `:id` in the URL, because the server
+      // is the authority on which row was actually written.
+      //
+      // A demotion that removes this very screen is the intended outcome:
+      // RequireTenantAdmin re-runs against the fresh identity and redirects.
+      if (next.id === me.user.id) await refreshMe();
     } catch (caught) {
       setActionError(caught instanceof Error ? caught : new Error(String(caught)));
     } finally {
