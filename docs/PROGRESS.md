@@ -2356,3 +2356,62 @@ The wording for deployment is fixed and should not drift: **deploy-ready, not
 deployed.** Screenshots come from the app running locally. The deployed frontend
 is **not** to be linked as "Live" — it stops at the login screen, because it was
 built against a placeholder API URL.
+
+---
+
+## Phase 10 — 2026-07-27
+
+Done: the portfolio write-up exists. `mini-erp` is the second case study on
+`D:\Work\lw-sports-portfolio` (`Nimrod-DG/portofolio`), reachable at
+`#project-mini-erp`, and the home grid now says "2 projects".
+
+What was produced in that repository:
+
+- **`capture-erp.mjs`** — a Playwright capture script. Sessions grouped by
+  account × viewport × theme; document IDs resolved by navigating the lists
+  rather than hard-coded; the one mutating shot (posting a goods receipt) runs
+  last, after every read-only shot.
+- **27 screenshots** in `shots/erp-*.jpg`, optimized into `shots/opt/`. Twenty-two
+  of them are used on the page; the five dropped are plain CRUD lists
+  (suppliers, product detail, warehouses, users, login) that carried no argument.
+- **The case study** in `src/page.html`, with sections namespaced `erp-*` and a
+  per-project topbar nav, which is what stops the two case studies' section links
+  colliding.
+
+Numbers cited on the page, all verified against this repository on the day:
+376 backend tests, 102 frontend tests, 6 migrations, 14 tables under forced RLS,
+2 `security_invoker` views, 11 `cmd/dbverify` checks, 3 modules, 5 ranked role
+levels. Both suites were run green before publishing.
+
+Deployment wording held as specified: **deploy-ready, not deployed**. The
+deployed frontend is not linked anywhere on the page — the `.live` nav slot and
+both call-to-action buttons point at the GitHub repository instead.
+
+Also changed here: **`README.md`**, at the developer's request, so the project can
+be run correctly from a clean clone. `make migrate` and `make seed` were missing
+from the run sequence entirely, and three traps are now written down — the
+Firebase service-account key that `make seed` needs, the demo accounts and what
+each one demonstrates, and the fact that Vite silently moving off `:5173` puts it
+outside `CORS_ORIGINS` and makes every screen render empty with nothing in any
+log to explain it.
+
+Tests green: full backend suite (376) and frontend suite (102), plus
+`make verify-db` — all 11 checks against the local database.
+
+Deviations from spec: two, both deliberate.
+1. `optimize.mjs` crop fractions were *measured* — a throwaway script found the
+   last row of real content in each capture — rather than eyeballed, because an
+   ERP screen is mostly table and the dead canvas below the content varies
+   enormously between a nine-row list and a two-line filtered result.
+2. `build.mjs` now stamps intrinsic `width`/`height` onto every inlined image.
+   This was a real bug, not a nicety: lazy images reserve no height, so the
+   document grew *during* a smooth scroll and in-page nav links landed ~3,400px
+   short of their section. Sizes are read from the files, so re-cropping a shot
+   cannot leave a stale number behind.
+
+TODO(post-mvp) markers added: none.
+
+Next: nothing is blocked here. When a payment method clears, `make deploy-api`
+and then `make deploy-web` with a real `VITE_API_BASE_URL`; at that point the
+portfolio's status section and the `.live` nav slot are the two places that need
+updating.
