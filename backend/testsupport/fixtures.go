@@ -127,13 +127,34 @@ func (d *TestDB) NewTenantInTZ(t *testing.T, name, timezone string) *TenantFixtu
 // An absent module means `none` — the level is the absence of a row (§5.3).
 func (f *TenantFixture) NewUser(t *testing.T, roles map[string]string) *UserFixture {
 	t.Helper()
+	return f.NewUserAs(t, "staff", roles)
+}
+
+// NewAdmin creates a tenant admin with **no** user_module_roles rows.
+//
+// That absence is the correct shape, not a shortcut: an admin holds `admin`
+// implicitly in every entitled module, and seeding rows for them would make a
+// later demotion restore levels they never chose (§5.4). B7 exists to check
+// that this shape resolves to full access, and B8 that it still stops at the
+// tenant's entitlements.
+func (f *TenantFixture) NewAdmin(t *testing.T) *UserFixture {
+	t.Helper()
+	return f.NewUserAs(t, "admin", nil)
+}
+
+// NewUserAs creates a user with an explicit tenant role and per-module levels.
+func (f *TenantFixture) NewUserAs(t *testing.T, tenantRole string, roles map[string]string) *UserFixture {
+	t.Helper()
 	n := next()
 
+	if roles == nil {
+		roles = map[string]string{}
+	}
 	u := &UserFixture{
 		ID:          uuid.New(),
 		FirebaseUID: fmt.Sprintf("uid-%d", n),
 		Email:       fmt.Sprintf("user-%d@example.test", n),
-		TenantRole:  "staff",
+		TenantRole:  tenantRole,
 		Roles:       roles,
 	}
 	mustExec(t, f.db.Owner, `
@@ -191,9 +212,26 @@ func (f *TenantFixture) Suspend(t *testing.T) {
 // entitlement, not just the role.
 func (f *TenantFixture) DisableModule(t *testing.T, moduleCode string) {
 	t.Helper()
+	f.SetModule(t, moduleCode, false)
+}
+
+// SetModule toggles one entitlement, standing in for the superadmin console's
+// PUT /admin/tenants/:id/modules/:code. Used by B5, where the point is that the
+// change lands on the next request with no restart and nothing to invalidate.
+func (f *TenantFixture) SetModule(t *testing.T, moduleCode string, enabled bool) {
+	t.Helper()
 	mustExec(t, f.db.Owner, `
-		UPDATE tenant_modules SET enabled = false
-		WHERE tenant_id = ? AND module_code = ?`, f.ID, moduleCode)
+		INSERT INTO tenant_modules (tenant_id, module_code, enabled)
+		VALUES (?, ?, ?)
+		ON CONFLICT (tenant_id, module_code) DO UPDATE SET enabled = EXCLUDED.enabled`,
+		f.ID, moduleCode, enabled)
+}
+
+// SetTenantRole promotes or demotes a user directly in the database, for the
+// arrange half of a test that is about something else.
+func (d *TestDB) SetTenantRole(t *testing.T, userID uuid.UUID, tenantRole string) {
+	t.Helper()
+	mustExec(t, d.Owner, `UPDATE users SET tenant_role = ? WHERE id = ?`, tenantRole, userID)
 }
 
 // AsTenant runs fn against this tenant on the app pool, with RLS in force.

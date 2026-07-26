@@ -34,8 +34,13 @@ dev-api:
 dev-web:
 	cd frontend && npm run dev
 
+# -p 1 runs one package at a time. Each package that touches the database starts
+# its own PostgreSQL container (one per test process), and Phase 2 saw a whole
+# package fail at 0.00s because a container never came up under the load of two
+# in parallel. Phase 3 makes it three, so serialising is no longer optional. The
+# suite takes about ten seconds either way.
 test:
-	cd backend && go test ./...
+	cd backend && go test ./... -p 1
 	cd frontend && npm run build
 
 # cmd/migrate applies the versioned migrations and then re-applies

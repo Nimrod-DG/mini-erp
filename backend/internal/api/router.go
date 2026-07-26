@@ -19,19 +19,33 @@ import (
 	"github.com/DGosal/mini-erp/backend/internal/middleware"
 )
 
-// Deps is everything the HTTP layer needs from the outside. The Verifier is an
-// interface so tests wire a fake and never touch the network (§12.4).
+// Deps is everything the HTTP layer needs from the outside. Verifier and Users
+// are interfaces so tests wire fakes and never touch the network (§12.4).
 type Deps struct {
-	Pools       *db.Pools
-	Verifier    auth.Verifier
+	Pools    *db.Pools
+	Verifier auth.Verifier
+	// Users provisions accounts in the identity provider. Only the two
+	// user-creating endpoints touch it.
+	Users       auth.UserManager
 	CORSOrigins []string
 	// Quiet suppresses the request log. Tests set it; nothing else should.
 	Quiet bool
 }
 
+// server is the handler receiver. Handlers are methods rather than package
+// functions because they need the pools and the provider, and threading those
+// through a package-level variable would make the test harness and the binary
+// share mutable state.
+type server struct {
+	pools *db.Pools
+	users auth.UserManager
+}
+
 // New builds the application. Route registration order is load-bearing — see
 // the comment on /api/health.
 func New(deps Deps) *fiber.App {
+	s := &server{pools: deps.Pools, users: deps.Users}
+
 	app := fiber.New(fiber.Config{
 		AppName:               "mini-erp",
 		DisableStartupMessage: true,
@@ -45,7 +59,7 @@ func New(deps Deps) *fiber.App {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:  strings.Join(deps.CORSOrigins, ","),
 		AllowHeaders:  "Origin, Content-Type, Accept, Authorization, " + middleware.HeaderRequestID,
-		AllowMethods:  "GET, POST, PATCH, DELETE, OPTIONS",
+		AllowMethods:  "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 		ExposeHeaders: middleware.HeaderRequestID,
 	}))
 	app.Use(middleware.RequestID())
@@ -61,8 +75,8 @@ func New(deps Deps) *fiber.App {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
-	// Steps 2-4 of §7, global to every other /api route. RequireModule (step 5)
-	// is per-route and arrives in Phase 3.
+	// Steps 2-4 of §7, global to every other /api route. Step 5 — the
+	// per-route authorization gate — is the group middleware below.
 	api := app.Group("/api",
 		middleware.FirebaseAuth(deps.Verifier),
 		middleware.ResolveIdentity(deps.Pools),
@@ -70,6 +84,33 @@ func New(deps Deps) *fiber.App {
 	)
 
 	api.Get("/me", Me)
+
+	// The platform plane (§5.7). TenantTx above passes straight through for a
+	// superadmin, who has no tenant to scope to, so these handlers reach the
+	// erp_admin pool directly — which is revoked from every tenant business
+	// table (§4.2). A tenant user reaching here opens a transaction it does not
+	// need and is then refused by RequireSuperadmin, which rolls it back.
+	admin := api.Group("/admin", middleware.RequireSuperadmin())
+	admin.Get("/modules", s.listModules)
+	admin.Get("/tenants", s.listTenants)
+	admin.Post("/tenants", s.createTenant)
+	admin.Get("/tenants/:id", s.getTenant)
+	admin.Patch("/tenants/:id", s.patchTenant)
+	admin.Get("/tenants/:id/modules", s.listTenantModules)
+	admin.Put("/tenants/:id/modules/:code", s.setTenantModule)
+
+	// The tenant plane (§5.7). Gated on the *tenant* role, not a module role:
+	// "who inside this company may do what" is not any one module's business.
+	tenant := api.Group("/tenant", middleware.RequireTenantAdmin())
+	tenant.Get("/users", s.listUsers)
+	tenant.Post("/users", s.createUser)
+	tenant.Get("/users/:id", s.getUser)
+	tenant.Patch("/users/:id", s.patchUser)
+	tenant.Put("/users/:id/modules", s.setUserModules)
+	tenant.Put("/users/:id/modules/:code", s.setUserModule)
+
+	// No DELETE on either group, deliberately. Tenants are suspended and users
+	// are deactivated (§6.9.4, I5) — the route not existing is the enforcement.
 
 	return app
 }

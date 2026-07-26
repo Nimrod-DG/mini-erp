@@ -19,7 +19,7 @@ func main() {
 
 	// Built at boot, not per request: it fails loudly here if the service
 	// account key is missing, rather than turning every request into a 500.
-	verifier, err := auth.NewFirebaseVerifier(context.Background(), cfg.FirebaseProjectID)
+	firebaseAuth, err := auth.NewFirebase(context.Background(), cfg.FirebaseProjectID)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -31,9 +31,13 @@ func main() {
 		}
 	}()
 
+	// One Admin SDK client, handed over as two narrow interfaces: the request
+	// chain gets a Verifier that can only return a UID, and the two
+	// provisioning endpoints get a UserManager (§3.4).
 	app := api.New(api.Deps{
 		Pools:       pools,
-		Verifier:    verifier,
+		Verifier:    firebaseAuth,
+		Users:       firebaseAuth,
 		CORSOrigins: cfg.CORSOrigins,
 	})
 

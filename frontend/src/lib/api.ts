@@ -92,3 +92,190 @@ export async function apiFetch<T>(
 export function getMe(): Promise<Me> {
   return apiFetch<Me>("/api/me");
 }
+
+/** `none` is a value the API accepts and never stores — setting it deletes the
+ *  row (§5.3). So it is legal in a request and in a matrix cell, but never in
+ *  `moduleRoles`, which is why it is a separate type. */
+export type RoleLevelOrNone = RoleLevel | "none";
+
+/** The §9.0 list envelope. `totalItems` is mandatory: "Page 3 of ?" strands
+ *  people (§10.7.4). */
+export type ListResponse<T> = {
+  data: T[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+};
+
+export type ListQuery = {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+  sort?: string;
+};
+
+function queryString(query: ListQuery): string {
+  const params = new URLSearchParams();
+  if (query.page && query.page > 1) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  if (query.q) params.set("q", query.q);
+  if (query.sort) params.set("sort", query.sort);
+  const rendered = params.toString();
+  return rendered ? `?${rendered}` : "";
+}
+
+// --------------------------------------------------------------------------
+// Platform plane — superadmin only (§5.7).
+// --------------------------------------------------------------------------
+
+export type ModuleCatalogueEntry = {
+  code: ModuleCode;
+  name: string;
+  description: string;
+  sortOrder: number;
+};
+
+export type TenantModule = {
+  code: ModuleCode;
+  name: string;
+  description: string;
+  enabled: boolean;
+};
+
+export type TenantSummary = {
+  id: string;
+  name: string;
+  slug: string;
+  status: "active" | "suspended";
+  timezone: string;
+  /** Active users only — a workspace whose people are all deactivated is empty
+   *  in the sense the console is asking about. */
+  userCount: number;
+  adminCount: number;
+  moduleCount: number;
+  enabledModules: ModuleCode[];
+  createdAt: string;
+};
+
+export type TenantDetail = TenantSummary & { modules: TenantModule[] };
+
+export type CreateTenantRequest = {
+  name: string;
+  slug: string;
+  timezone: string;
+  modules: ModuleCode[];
+  admin: { email: string; fullName: string; password: string };
+};
+
+export function listTenants(query: ListQuery = {}) {
+  return apiFetch<ListResponse<TenantSummary>>(
+    `/api/admin/tenants${queryString(query)}`,
+  );
+}
+
+export function getTenant(id: string) {
+  return apiFetch<TenantDetail>(`/api/admin/tenants/${id}`);
+}
+
+export function createTenant(body: CreateTenantRequest) {
+  return apiFetch<{ tenant: TenantDetail; admin: { id: string; email: string } }>(
+    "/api/admin/tenants",
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export function patchTenant(
+  id: string,
+  body: { name?: string; timezone?: string; status?: "active" | "suspended" },
+) {
+  return apiFetch<TenantDetail>(`/api/admin/tenants/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function setTenantModule(id: string, code: ModuleCode, enabled: boolean) {
+  return apiFetch<TenantModule[]>(`/api/admin/tenants/${id}/modules/${code}`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function listModuleCatalogue() {
+  return apiFetch<ModuleCatalogueEntry[]>("/api/admin/modules");
+}
+
+// --------------------------------------------------------------------------
+// Tenant plane — tenant admin only (§5.7).
+// --------------------------------------------------------------------------
+
+export type TenantUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  tenantRole: TenantRole;
+  isActive: boolean;
+  createdAt: string;
+  /** What is stored. Empty for an admin, who holds `admin` implicitly. */
+  moduleRoles: Partial<Record<ModuleCode, RoleLevel>>;
+  /** What LevelFor actually resolves — entitlement ceiling and implicit-admin
+   *  rule applied. Render this one, or the screen misrepresents the model. */
+  effectiveRoles: Partial<Record<ModuleCode, RoleLevel>>;
+};
+
+export type UserModuleCell = {
+  code: ModuleCode;
+  name: string;
+  roleLevel: RoleLevelOrNone;
+  effectiveLevel: RoleLevelOrNone;
+};
+
+export type TenantUserDetail = TenantUser & { modules: UserModuleCell[] };
+
+export type CreateUserRequest = {
+  email: string;
+  fullName: string;
+  password: string;
+  tenantRole: "staff" | "admin";
+  moduleRoles: Partial<Record<ModuleCode, RoleLevelOrNone>>;
+};
+
+export function listTenantUsers(query: ListQuery = {}) {
+  return apiFetch<ListResponse<TenantUser>>(
+    `/api/tenant/users${queryString(query)}`,
+  );
+}
+
+export function getTenantUser(id: string) {
+  return apiFetch<TenantUserDetail>(`/api/tenant/users/${id}`);
+}
+
+export function createTenantUser(body: CreateUserRequest) {
+  return apiFetch<TenantUserDetail>("/api/tenant/users", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchTenantUser(
+  id: string,
+  body: { fullName?: string; isActive?: boolean; tenantRole?: "staff" | "admin" },
+) {
+  return apiFetch<TenantUserDetail>(`/api/tenant/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+/** The whole matrix in one request and one transaction. Six dropdowns must not
+ *  be six requests that can half-fail (§9.3). */
+export function setTenantUserModules(
+  id: string,
+  moduleRoles: Partial<Record<ModuleCode, RoleLevelOrNone>>,
+) {
+  return apiFetch<TenantUserDetail>(`/api/tenant/users/${id}/modules`, {
+    method: "PUT",
+    body: JSON.stringify({ moduleRoles }),
+  });
+}

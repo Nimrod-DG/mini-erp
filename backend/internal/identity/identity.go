@@ -42,18 +42,29 @@ type Identity struct {
 	TenantStatus   string
 	TenantTimezone string
 
+	// EnabledModules is the set of module codes the tenant is entitled to —
+	// layer 1 of §5.1, and the ceiling on every level below it.
+	//
+	// It is separate from ModuleRoles because the two failures must stay
+	// distinguishable: a tenant admin holds no role rows at all, so an empty
+	// ModuleRoles cannot tell "this tenant never bought Finance"
+	// (module_not_enabled) from "this user was given nothing in Finance"
+	// (insufficient_module_role). Only this set can.
+	EnabledModules map[string]bool
+
 	// ModuleRoles maps module code to role level for the modules the tenant is
 	// entitled to. An absent module means level `none` — the level is the
 	// absence of a row (§5.3) — so this map is never a source of `"none"`.
 	//
-	// It is a rendering input and an input to RequireModule (Phase 3); it is
-	// not itself a permission check.
+	// It is a rendering input, and an input to LevelFor; it is not itself a
+	// permission check. Read it through LevelFor, which applies the entitlement
+	// ceiling and the implicit-admin rule that this map knows nothing about.
 	ModuleRoles map[string]string
 }
 
 // IsSuperadmin reports whether the caller is a platform superadmin, who belongs
 // to no tenant and holds no module roles.
-func (i *Identity) IsSuperadmin() bool { return i.TenantRole == "superadmin" }
+func (i *Identity) IsSuperadmin() bool { return i.TenantRole == TenantSuperadmin }
 
 // row is the shape of the one join that identity resolution costs. The tenant
 // columns are nullable because a superadmin has no tenant.
@@ -105,12 +116,13 @@ func Resolve(ctx context.Context, g *gorm.DB, firebaseUID string) (*Identity, er
 	}
 
 	id := &Identity{
-		UserID:      r.ID,
-		FirebaseUID: r.FirebaseUID,
-		Email:       r.Email,
-		FullName:    r.FullName,
-		TenantRole:  r.TenantRole,
-		ModuleRoles: map[string]string{},
+		UserID:         r.ID,
+		FirebaseUID:    r.FirebaseUID,
+		Email:          r.Email,
+		FullName:       r.FullName,
+		TenantRole:     r.TenantRole,
+		EnabledModules: map[string]bool{},
+		ModuleRoles:    map[string]string{},
 	}
 
 	if id.IsSuperadmin() {
@@ -138,40 +150,52 @@ func Resolve(ctx context.Context, g *gorm.DB, firebaseUID string) (*Identity, er
 		return nil, ErrTenantSuspended
 	}
 
-	roles, err := moduleRoles(ctx, g, id.UserID, id.TenantID)
+	enabled, roles, err := entitlements(ctx, g, id.UserID, id.TenantID)
 	if err != nil {
 		return nil, err
 	}
+	id.EnabledModules = enabled
 	id.ModuleRoles = roles
 	return id, nil
 }
 
-// moduleRoles returns the caller's level in each module their tenant is
-// entitled to. A role in a module the tenant does not have is not reported:
-// the entitlement gate comes first, and the two failures stay distinguishable
+// entitlements returns the tenant's enabled modules and, within them, the
+// caller's explicit level in each.
+//
+// It is one query rather than two because identity resolution runs on *every*
+// request (I9), and the entitlement set is the driving table: every row is a
+// module the tenant has, and role_level is NULL when the user holds no row in
+// it. So a tenant admin — who correctly has no rows at all — still comes back
+// with a full entitlement set.
+//
+// A role in a module the tenant does not have is not reported at all: the
+// entitlement gate comes first, and the two failures must stay distinguishable
 // to the client (module_not_enabled vs insufficient_module_role, §7).
-func moduleRoles(ctx context.Context, g *gorm.DB, userID, tenantID uuid.UUID) (map[string]string, error) {
+func entitlements(ctx context.Context, g *gorm.DB, userID, tenantID uuid.UUID) (map[string]bool, map[string]string, error) {
 	var rows []struct {
 		ModuleCode string
-		RoleLevel  string
+		RoleLevel  *string
 	}
 	err := g.WithContext(ctx).Raw(`
-		SELECT umr.module_code, umr.role_level
-		FROM user_module_roles umr
-		JOIN tenant_modules tm ON tm.module_code = umr.module_code
-		                      AND tm.tenant_id   = ?
-		                      AND tm.enabled     = true
-		JOIN modules m ON m.code = umr.module_code AND m.is_available = true
-		WHERE umr.user_id = ?`, tenantID, userID).Scan(&rows).Error
+		SELECT tm.module_code, umr.role_level
+		FROM tenant_modules tm
+		JOIN modules m ON m.code = tm.module_code AND m.is_available = true
+		LEFT JOIN user_module_roles umr ON umr.module_code = tm.module_code
+		                              AND umr.user_id     = ?
+		WHERE tm.tenant_id = ? AND tm.enabled = true`, userID, tenantID).Scan(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("identity: load module roles: %w", err)
+		return nil, nil, fmt.Errorf("identity: load entitlements: %w", err)
 	}
 
-	out := make(map[string]string, len(rows))
+	enabled := make(map[string]bool, len(rows))
+	roles := make(map[string]string, len(rows))
 	for _, r := range rows {
-		out[r.ModuleCode] = r.RoleLevel
+		enabled[r.ModuleCode] = true
+		if r.RoleLevel != nil {
+			roles[r.ModuleCode] = *r.RoleLevel
+		}
 	}
-	return out, nil
+	return enabled, roles, nil
 }
 
 func derefOr(p *string, fallback string) string {

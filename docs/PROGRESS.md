@@ -26,8 +26,8 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
-**Phase:** 2 — done
-**Next action:** open [`phases/phase-3-permissions.md`](phases/phase-3-permissions.md) in a **new session**
+**Phase:** 3 — done
+**Next action:** open [`phases/phase-4-inventory.md`](phases/phase-4-inventory.md) in a **new session**
 
 Migration files that now exist (`backend/migrations/`), applied in this order by
 `cmd/migrate`:
@@ -41,16 +41,63 @@ Migration files that now exist (`backend/migrations/`), applied in this order by
 | `004_views_triggers.up.sql` | both views, `grl_no_over_receipt`, `jel_balanced`, the two terminal-state triggers |
 | `005_rls_grants.up.sql` | RLS enable/force/policy, grants, ledger and superadmin revokes, `seed_tenant_accounts()` |
 
-Backend packages as of Phase 2:
+Backend packages as of Phase 3:
 
 | Package | Contents |
 |---|---|
-| `internal/auth` | `Verifier` interface, `FirebaseVerifier`. UID only, never claims |
-| `internal/identity` | `Identity`, `Resolve` — the one database lookup behind I9 |
-| `internal/middleware` | `RequestID` `FirebaseAuth` `ResolveIdentity` `TenantTx`, and the context accessors `IdentityFrom` / `TxFrom` |
-| `internal/httpx` | the §9.8 error envelope: `Fail`, `FailWith`, `Unauthenticated` |
-| `internal/api` | `New` (route wiring, so tests drive the real chain) and `Me` |
-| `testsupport` | `FakeVerifier`, plus `NewSuperadmin` / `Deactivate` / `Suspend` / `DisableModule` fixtures |
+| `internal/auth` | `Verifier` (UID only, never claims) and `UserManager` (create/delete/disable), both satisfied by one `Firebase` value |
+| `internal/identity` | `Identity`, `Resolve` — the one database lookup behind I9 — plus `RoleLevel` and **`LevelFor`**, the single function every permission check goes through |
+| `internal/middleware` | `RequestID` `FirebaseAuth` `ResolveIdentity` `TenantTx` `RequireModule` `RequireSuperadmin` `RequireTenantAdmin`, and the accessors `IdentityFrom` / `TxFrom` |
+| `internal/httpx` | the §9.8 error envelope (`Fail`, `FailWith`, `Unauthenticated`) and the §9.0 list contract (`ParseList`, `ListResponse`) |
+| `internal/db` | pools, `WithTenant`, migrations, and `SQLState` / `IsUniqueViolation` for mapping constraints to business outcomes |
+| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers and the six `/tenant/users` handlers |
+| `testsupport` | `FakeVerifier`, `FakeUsers`, the shared HTTP `Harness` (used by both test packages), and the tenant/user fixtures |
+
+Frontend routes as of Phase 3: `/login` `/auth/action` `/` `/admin/tenants`
+`/admin/tenants/new` `/admin/tenants/:id` `/settings/users` `/settings/users/new`
+`/settings/users/:id`. All signed-in screens render inside `AppShell`.
+
+### What a module phase inherits
+
+Phases 4–6 each build a module. These already exist — use them rather than
+rebuilding them, and note the two traps at the bottom.
+
+| Need | Use |
+|---|---|
+| Gate a route on a module level | `middleware.RequireModule("inventory", identity.RoleApprover)` as a per-route handler. Levels: `identity.RoleNone` `RoleViewer` `RoleUser` `RoleApprover` `RoleAdmin`, ranked |
+| A record-level rule inside a handler | `middleware.IdentityFrom(c).LevelFor("inventory")`, compared with `>=`. Never re-derive a level from `ModuleRoles` — that map has no entitlement ceiling and no implicit-admin rule |
+| The tenant-scoped transaction | `middleware.TxFrom(c)`. Every tenant query goes on it (I1). Nil only for a superadmin, who cannot reach a gated route |
+| A paginated list endpoint (§9.0) | `httpx.ParseList(c, sortable, "defaultSort")` + `httpx.NewListResponse(rows, params, total)`. `sortable` maps API field → SQL column and is the injection guard; `params.OrderBy(tieBreak)`, `.Offset()`, `.Like()` |
+| Map a constraint to a business outcome | `db.IsUniqueViolation(err)`, `db.ConstraintName(err)`, `db.SQLState(err)` |
+| Reject a request | `httpx.Fail(c, status, code, msg)` or `FailWith(..., details)`. 400 `malformed`, 404 `not_found`, 409 `in_use` / `last_admin`, 422 business rule |
+| HTTP tests | `testsupport.NewHarness(t)` → `h.Get/Post/Patch/Put`, `testsupport.Decode[T]`, `AssertStatus`, `AssertErrorCode`. Put them in `internal/api` (package `api_test`) |
+| Fixtures | `h.DB.NewTenant(t, name)` gives a tenant with all three modules, master data, and a staff user with `admin` everywhere. Also `NewUser(roles)` `NewAdmin()` `NewUserAs(role, roles)` `NewSuperadmin()` `Deactivate` `Suspend` `SetModule` |
+| Frontend list screen | `useAsync(key, fetcher)` plus `SkeletonRows` `EmptyState` `ErrorNotice` `Pagination` from `components/ListStates.tsx`. Screens render inside `<AppShell title=… actions=…>` |
+
+**Trap 1 — a helper must never signal failure by returning what `httpx.Fail`
+returned.** `Fail` returns `nil` deliberately: the body is already written, and
+handing an error up would have Fiber write a second one over it. So
+`if err := helper(c); err != nil` is *always false*. The refusal's status code
+sticks and the success path's own `c.JSON` overwrites the body — a 403 carrying a
+success payload. Validating helpers are pure functions returning real errors; see
+`parseMatrix` in `internal/api/tenant_users.go`.
+
+**Trap 2 — `users` and `user_module_roles` carry no RLS**, and neither do the
+other four platform tables. Any query against them needs an explicit
+`tenant_id = <the caller's>`; RLS protects only the fourteen tenant tables. This
+does not apply to the inventory, procurement, or finance tables, which are all
+RLS-forced.
+
+**Two things Phase 4 should replace, not add to:**
+
+- `testsupport/harness.go` registers twelve `/api/probe/<module>/<level>` routes
+  that exist only because no real gated route did. They stand in for the module
+  endpoints. Keep them — Group B asserts against them — but Phase 4's own tests
+  should gate on the **real** inventory routes, or they prove nothing about what
+  ships.
+- `AppShell.tsx` has an empty `modulePaths` map. Adding `inventory: "/inventory/products"`
+  there is the whole of the nav change; the entitlement filter around it is
+  already the real one, reading `/api/me`.
 
 ---
 
@@ -80,6 +127,19 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 | 2026-07-26 | Identity resolution fetches the user row **without** an `is_active` filter and checks the flag in Go, where the phase brief writes `WHERE firebase_uid = ? AND is_active = true` | Identical outcome — both are 401 — but an orphaned Firebase account and a deactivated employee are different operational events, and only this shape can tell them apart in a log line. |
 | 2026-07-26 | Route wiring lives in `internal/api.New`, not in `cmd/api/main.go` | So the middleware tests can drive the *real* chain with only the Verifier faked. A test that assembles its own middleware stack asserts things about a stack that does not ship. |
 | 2026-07-26 | `index.html` carries a two-line inline `<style>` duplicating the canvas colour | The pre-paint script sets the `.dark` class, but in dev Vite injects the stylesheet via JS *after* first paint, so the class alone still yields a white first frame. Canvas only; every other colour comes from the tokens. |
+| 2026-07-26 | `000_roles.sql` now also grants `erp_app` **`DELETE` on `user_module_roles`**, and on nothing else anywhere | §5.3 requires setting a level to `none` to *delete* the row — the CHECK on `role_level` refuses to store `'none'` — but the file granted only `SELECT, INSERT, UPDATE`, so every revocation would have been a `42501`. This is the one exception to I5, and it is narrow on purpose: a grant row is a present-tense permission with no history worth preserving, unlike the documents and ledgers I5 protects. Deliberately not extended to `users` (deactivated, never deleted) or `tenant_modules` (toggled, never deleted). |
+| 2026-07-26 | `RequireModule`'s `module`/`required`/`actual` payload rides in the envelope's `details` object, not as siblings of `error` | `middleware.md` §7 writes it inline as `{"error":"module_not_enabled","module":"finance"}`, but §9.8 fixes the envelope at exactly three keys. A client that has to know which error codes add extra top-level keys cannot parse errors generically. Phase 2's `httpx.FailWith` had already committed to `details` for precisely this payload. |
+| 2026-07-26 | `Identity` gained `EnabledModules` alongside `ModuleRoles` | `ModuleRoles` is the *intersection* of the user's levels and the tenant's entitlements (Phase 2 decision), and an intersection cannot distinguish "this tenant never bought Finance" from "this user was given nothing in Finance" — which is exactly the `module_not_enabled` / `insufficient_module_role` split. A tenant admin makes it acute: they correctly have no role rows at all, so their `ModuleRoles` is empty everywhere. Resolution is still two queries, not three: the entitlement set is the driving table and role level a `LEFT JOIN` onto it. |
+| 2026-07-26 | `auth.FirebaseVerifier` became `auth.Firebase`, satisfying both `Verifier` and `UserManager` from one Admin SDK client | Two constructors meant two `firebase.NewApp` calls reading the same key off disk at boot. The guarantee that authorization never comes from a custom claim lives in the *interface* `Verify` is reached through — `Verifier` returns a UID and nothing else — not in the concrete type, so nothing is weakened. `main` hands the same value over as two narrow interfaces. |
+| 2026-07-26 | Both user-creating endpoints take an **initial password** rather than emailing an invite link | The nicer flow is a provisioning email whose link lands on `/auth/action`, but Phase 2 established that `notification.sendEmail.callbackUri` **cannot currently be set on this Firebase project** — every change returns `400 EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED`. An invite flow would therefore be unverifiable locally and would land users on Firebase's hosted page. The admin sets a password, the user changes it via *Forgot your password?*, and there is no method on `UserManager` to read one back. Revisit at Phase 9 once `callbackUri` is settable. |
+| 2026-07-26 | `PUT /tenant/users/:id/modules` leaves modules the payload does not name **unchanged**, rather than treating absence as `none` | §9.3 calls it "bulk set the whole matrix", which reads as replace-all. But a client bug that drops a field would then silently revoke access, and the screen this endpoint exists for always sends every module anyway — so the destructive reading buys nothing and costs a whole class of incident. `none` still deletes, explicitly. |
+| 2026-07-26 | `POST /admin/tenants` with `modules` absent enables **all** available modules; a row is written to `tenant_modules` for every catalogue module either way | A workspace created with nothing enabled looks broken to the admin who signs into it first. The create screen always sends the list explicitly, so the default only affects API callers. Writing a row per module (enabled or not) makes the entitlement matrix complete from the start, so `PUT .../modules/:code` is always an update. |
+| 2026-07-26 | Handler helpers never signal failure by returning what `httpx.Fail` returned; the validating ones (`parseMatrix`, `resolveModules`) are pure and return real errors | `Fail` returns **nil** by design — Phase 2's reason: returning an error would have Fiber write a second body over the one just written. So `if err := helper(c); err != nil` is always false, the refusal's status code sticks, and the success path's own `c.JSON` overwrites the body. This shipped briefly and B8 caught it: a `403` whose body was a user-detail object. |
+| 2026-07-26 | A superadmin hitting a `RequireModule`-gated route gets `403 module_not_enabled` | No code in the §3 contract describes "you are a platform administrator", and inventing one for a case that cannot arise from the UI is worse than reusing the honest answer: a superadmin has no tenant, so no module is enabled for them. `RequireSuperadmin` / `RequireTenantAdmin` use `forbidden`, which §9.8 does name. |
+| 2026-07-26 | The user responses carry **`effectiveRoles`** (what `LevelFor` resolves) beside `moduleRoles` (what is stored) | The two differ for every tenant admin — stored empty, effective `admin` everywhere entitled — so a screen rendering the stored map shows "no access" next to the person who has all of it. Computing it server-side, through the same `LevelFor`, is what stops §5.4 being reimplemented in TypeScript where it would drift. |
+| 2026-07-26 | Group B lives in a new `internal/api` test package, the HTTP harness moved into `testsupport`, and `make test` now passes `-p 1` | Three test packages now start a PostgreSQL container each; Phase 2 already saw one fail to come up with two in parallel. `-p 1` serialises packages and costs nothing measurable. The harness moved rather than being copied because two copies of a permission-test harness will drift, and the shipped chain is the thing under test. |
+| 2026-07-26 | Added `/settings/users/new`, which §10.6 does not list | `POST /api/tenant/users` exists in §9.3 and the user list needs an "Add user" target. §10.6 lists `/admin/tenants/new` and omits its tenant-plane counterpart; this reads as an oversight rather than a decision. |
+| 2026-07-26 | Cross-tenant and malformed-ID misses are `404`, never `403` | An admin probing another workspace's user ID must not be able to tell an ID that exists elsewhere from one that never existed — that difference is a cross-tenant existence oracle. `/tenant/users/banana` is a 404 for the same reason. |
 
 ---
 
@@ -368,3 +428,156 @@ The `oobCode` is what matters and it is origin-independent.
 
 **Next:** open [`phases/phase-3-permissions.md`](phases/phase-3-permissions.md)
 in a new session.
+
+## Phase 3 — 2026-07-26
+
+**Done:** the permission model is enforced, and both control planes have screens.
+`Identity.LevelFor` is the one function every check goes through, with §5.4's
+ordering intact: entitlement first, then the implicit-admin shortcut, then the
+stored level. `RequireModule` turns it into the two distinct refusals a client
+can act on — `module_not_enabled` is the superadmin's problem,
+`insufficient_module_role` is the tenant admin's — and carries `required`/`actual`
+so a console can name the dropdown to change.
+
+The platform plane (`/api/admin/*`, `erp_admin` pool, `RequireSuperadmin`) lists
+and creates workspaces, toggles entitlements, and suspends. `POST /admin/tenants`
+does tenant + first admin + chart of accounts in one transaction, seeding
+`accounts` through the `seed_tenant_accounts()` `SECURITY DEFINER` function
+because `erp_admin` has no grant on the table and must not be given one.
+
+The tenant plane (`/api/tenant/users`, `erp_app` pool, `RequireTenantAdmin`)
+manages people and their per-module levels, including the bulk matrix endpoint
+and the last-admin rule under `SELECT … FOR UPDATE`. Both user-creating endpoints
+follow §3.3: provider account first, database row second, provider account
+deleted again if the database refuses.
+
+Frontend: an `AppShell` with entitlement-driven nav, plus `/admin/tenants`,
+`/admin/tenants/new`, `/admin/tenants/:id` (entitlement toggles),
+`/settings/users`, `/settings/users/new`, and `/settings/users/:id` (the
+per-module role matrix). Superadmins land on `/admin/tenants` and see no business
+modules at all.
+
+**Tests green:** B1–B10, plus Groups A and I–J unchanged. **79 top-level tests**
+(85 including subtests in `internal/api` alone), up from 39 at Phase 2.
+`go test ./... -p 1` clean, `go vet` clean, `gofmt` clean, `npm run build` and
+`oxlint` clean.
+
+Beyond Group B, the tests that exist because something could go quietly wrong:
+
+- **Cross-tenant user management.** `users` and `user_module_roles` carry no RLS —
+  they cannot, since identity resolution reads `users` before tenant context
+  exists — so the tenant filter is application-side on *every* query in
+  `tenant_users.go`. Read, rename, deactivate, single-module grant, and bulk
+  grant are each asserted to 404 against another tenant's real user ID, and the
+  victim row is re-read afterwards to confirm nothing was written.
+- **The compensating delete of §3.3 step 4**, which is invisible in the response
+  body. `FakeUsers.ForceUID` makes the provider hand back a UID already parked on
+  a row in another tenant, so the insert violates `users_firebase_uid_key`; the
+  test then asserts the provider account was deleted.
+- **`erp_admin` still cannot read `accounts` directly**, asserted right after it
+  seeded them through the function. This is the test that fails if someone
+  "solves" §4.2.1 with a table grant.
+- **No `DELETE` route** on either plane, asserted with an authenticated request.
+- **Privilege escalation across planes:** a tenant admin cannot create or promote
+  a `superadmin` (400), and no provider account is created for the refused
+  request.
+- **The §9.0 list contract:** pagination, server-side sort across the whole result
+  set, `-` prefix, `pageSize` clamped to 100, unknown sort field → 400.
+
+**Four mutations were run to check the tests bite rather than merely pass. Two
+survived, and both taught something:**
+
+| Mutation | Result |
+|---|---|
+| `FOR UPDATE` removed from the last-admin count | **caught** — B10 reported "2 succeeded and 0 were refused", the exact race, leaving zero admins |
+| `LevelFor` reordered: admin shortcut before entitlement | **survived** all of Group B |
+| tenant filter dropped from `patchUser`'s `UPDATE` | **survived** |
+| tenant filter dropped from `patchUser`'s target `SELECT` | **survived** |
+
+The `LevelFor` survivor is the interesting one. `RequireModule` checks
+entitlement itself before calling `LevelFor` — it has to, because the two
+failures carry different error codes — so the ordering *inside* `LevelFor` is
+invisible to every HTTP-level test. It stops being invisible in Phase 4, where
+handlers call `LevelFor` directly for record-level rules with no middleware in
+front. Fixed by adding `internal/identity/level_test.go`: six pure unit tests, no
+container, and the mutation now fails two of them.
+
+The two tenant-filter survivors are mutually redundant defence in depth: the
+target `SELECT` 404s first, and if it did not, the `UPDATE`'s `RowsAffected == 0`
+would. Removing **both** does make the cross-tenant test fail — verified — with
+another tenant's user renamed and deactivated. So the property is covered; no
+single-line mutation can express it.
+
+**Live checks against `erp-project-b66ce`.** The fakes cannot catch a wrong Admin
+SDK call shape, and that failure would first appear in production, so
+`auth.Firebase`'s write half was exercised against the real project with a
+throwaway account, since deleted:
+
+| Call | Result |
+|---|---|
+| `CreateUser` | ok, returned a real UID |
+| `CreateUser` again, same address | mapped to `auth.ErrEmailExists` → 409, not an opaque 500 |
+| `SetDisabled(true)` / `SetDisabled(false)` | ok both ways |
+| `DeleteUser` | ok, nothing left behind |
+
+Also verified against the local Docker database and a freshly built binary:
+`go run ./cmd/migrate` applies the new grant idempotently, and
+`information_schema.role_table_grants` confirms `erp_app` holds `DELETE` on
+`user_module_roles` **and** that `erp_admin` does not. The API boots and
+`/api/health` is 200 without a token, while `/api/admin/tenants`,
+`/api/admin/modules`, and `/api/tenant/users` all return `401 unauthenticated`
+from the auth chain rather than 404 — the routes are wired.
+
+**Deviations from spec:** fourteen, all recorded in *Decisions taken* above. The
+two worth knowing about before Phase 4:
+
+- **`erp_app` now holds `DELETE` on `user_module_roles`**, and on nothing else.
+  §5.3 requires `none` to delete the row and the grant was missing, so every
+  revocation would have been a `42501`. It is the one exception to I5.
+- **A helper must never signal failure by returning `httpx.Fail`'s value**, which
+  is `nil` by design. This shipped briefly and B8 caught it as a 403 whose body
+  was a user-detail object. The validating helpers are now pure functions
+  returning real errors, with a comment on `parseMatrix` explaining why.
+
+**TODO(post-mvp) markers added:** none.
+
+**Known broken / left half-done:**
+
+- **The module nav items and the bottom tab bar are absent from `AppShell`.** The
+  entitlement filter that drives them is already the real one, reading
+  `/api/me`; each of Phases 4–6 adds a path to `modulePaths` in
+  `frontend/src/components/AppShell.tsx` and nothing else. §10.7.3's bottom tab
+  bar is deliberately deferred with them — its destinations are the module
+  screens, and a tab bar with one tab is not a navigation aid.
+- **A narrow orphan window remains in `POST /tenant/users`:** a `COMMIT` that
+  fails *after* a successful `INSERT` leaves a provider account with no `users`
+  row. Everything checkable is validated before the provider call and every
+  insert error is compensated, so reaching it needs the connection to drop
+  between the insert and the commit. There are no deferred constraints on those
+  two tables. It logs `api: ORPHANED firebase account …`, and the state is
+  already handled as a 401 by the middleware. A rollback hook on `TenantTx` would
+  close it properly; not worth the machinery for one call site yet.
+- **No live browser walkthrough of the six new screens.** They build and lint
+  clean and the API they call is covered end to end by the suite, but nobody has
+  signed in as a superadmin and clicked through workspace creation. Needs a
+  superadmin `users` row plus a real ID token; Phase 2's throwaway token-minter
+  was deleted, and Phase 7's seed script is where that belongs permanently.
+  **There is currently no superadmin row in the local database at all** — every
+  `/admin/*` screen is unreachable by hand until one is inserted.
+- **No frontend tests at all.** §12.5 defines them and Phase 3's brief does not
+  ask for them.
+- The `/api/warehouses` probe route in `testsupport` returns 500 for a
+  superadmin, because `TenantTx` opens no transaction for a tenantless identity
+  and the handler finds nil. That is the honest answer for a misconfigured route,
+  and the log line is noise in the test output; every *shipped* tenant route is
+  gated by `RequireModule`, which refuses them first.
+- `go test -race` still cannot run here — no C toolchain on `PATH`. CI runs it,
+  and B10 is the first test that would genuinely benefit.
+- **A password reset email has still not been observed arriving** (carried from
+  Phase 2). Both new endpoints hand out an initial password instead, so nothing
+  in Phase 3 depends on it.
+- A local API instance from an earlier session was killed to free `:8080`; the
+  newly built binary is running there now. `make dev` restarts everything.
+
+**Next:** open [`phases/phase-4-inventory.md`](phases/phase-4-inventory.md) in
+a new session.

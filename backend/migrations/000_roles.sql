@@ -57,6 +57,18 @@ BEGIN
   GRANT SELECT                 ON tenants, modules, tenant_modules TO erp_app;
   GRANT SELECT, INSERT, UPDATE ON users, user_module_roles         TO erp_app;
 
+  -- The one DELETE erp_app holds anywhere, and the one exception to I5.
+  --
+  -- Setting a module level to `none` *deletes* the row: `none` is the absence
+  -- of a row, and the CHECK on role_level refuses to store it (§5.3). A grant
+  -- table row is not master data, a document, or a ledger entry — it is a
+  -- present-tense grant, and revoking it has no history to preserve. Every
+  -- other table in this schema soft-deletes, cancels, or appends.
+  --
+  -- Deliberately not extended to `users`: users are deactivated, never
+  -- deleted (§6.9.4), and there is no DELETE /tenant/users/:id to serve.
+  GRANT DELETE                 ON user_module_roles                TO erp_app;
+
   -- Superadmins touch platform tables, and only platform tables. The matching
   -- REVOKE on every tenant business table lives in 005_rls_grants.sql, which
   -- is what makes "no access to tenant data" a property rather than a promise.
