@@ -7,6 +7,7 @@ import {
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  SourceFilterNotice,
   TableHead,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
@@ -61,7 +62,7 @@ export function LedgerPage() {
   // type — it is what "2 stock ledger entries created" links to on the goods
   // receipt confirmation panel, and it has to keep working when that link is
   // pasted to a colleague.
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const sourceId = params.get("sourceId") ?? "";
 
   const warehouses = useAsync("ledger-warehouses", () =>
@@ -166,34 +167,14 @@ export function LedgerPage() {
         </label>
       </div>
 
-      {sourceId !== "" && (
-        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3 rounded-lg border border-hairline bg-raised px-4 py-3 text-sm">
-          <span>
-            Showing only the movements from one document
-            {state.status === "ready" && state.data.data[0]?.sourceNumber && (
-              <>
-                {" — "}
-                <span className="tabular">
-                  {state.data.data[0].sourceNumber}
-                </span>
-              </>
-            )}
-            .
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              const next = new URLSearchParams(params);
-              next.delete("sourceId");
-              setParams(next, { replace: true });
-              setPage(1);
-            }}
-            className="text-accent underline decoration-hairline underline-offset-2"
-          >
-            Show all movements
-          </button>
-        </div>
-      )}
+      <SourceFilterNotice
+        showing="the movements from one document"
+        clearLabel="Show all movements"
+        sourceNumber={
+          (state.status === "ready" && state.data.data[0]?.sourceNumber) || null
+        }
+        onCleared={() => setPage(1)}
+      />
 
       {state.status === "error" ? (
         <ErrorNotice error={state.error} onRetry={reload} />

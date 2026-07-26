@@ -962,3 +962,88 @@ export function postGoodsReceipt(
     },
   );
 }
+
+// --------------------------------------------------------------------------
+// Finance (§9.6, §10.5).
+//
+// Reads only. The module is a stub: there is no manual journal entry and no
+// account CRUD in the MVP, so a `postJournalEntry` here would be a client
+// function for an endpoint that does not exist. Every entry the list returns was
+// written by a goods receipt inside the transaction that received the goods.
+// --------------------------------------------------------------------------
+
+export type AccountType =
+  | "asset"
+  | "liability"
+  | "equity"
+  | "revenue"
+  | "expense";
+
+export type Account = {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  isActive: boolean;
+};
+
+export type JournalEntryLine = {
+  id: string;
+  journalEntryId: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  accountType: AccountType;
+  /** One of these is zero on every line — `journal_entry_lines` has a CHECK that
+   *  says so. Both are the exact decimals PostgreSQL holds (I8). */
+  debit: number;
+  credit: number;
+  memo: string | null;
+};
+
+export type JournalSourceType = "goods_receipt" | "manual";
+
+export type JournalEntry = {
+  id: string;
+  entryNumber: string;
+  postedAt: string;
+  description: string;
+  sourceType: JournalSourceType;
+  sourceId: string | null;
+  /** The GR number and the order behind a `goods_receipt` entry, resolved
+   *  server-side so the screen links to a document rather than printing a UUID. */
+  sourceNumber: string | null;
+  sourcePoId: string | null;
+  /** The total of the debit side, summed in SQL. The credit side equals it by
+   *  construction — `jel_balanced` refuses to commit anything else — so do not
+   *  add the lines up here to check: a second implementation of a rule is one
+   *  that can disagree with the one that counts. */
+  amount: number;
+  createdById: string;
+  createdByName: string;
+  lines: JournalEntryLine[];
+};
+
+export type JournalEntryQuery = ListQuery & {
+  sourceType?: JournalSourceType | "";
+  /** The entry one document posted — the counterpart of `LedgerQuery.sourceId`,
+   *  and what the goods receipt confirmation panel links to (§10.3). */
+  sourceId?: string;
+  accountId?: string;
+};
+
+export function listJournalEntries(query: JournalEntryQuery = {}) {
+  return apiFetch<ListResponse<JournalEntry>>(
+    `/api/finance/journal-entries${queryString(query, {
+      sourceType: query.sourceType || undefined,
+      sourceId: query.sourceId,
+      accountId: query.accountId,
+    })}`,
+  );
+}
+
+export function listAccounts(query: ListQuery = {}) {
+  return apiFetch<ListResponse<Account>>(
+    `/api/finance/accounts${queryString(query)}`,
+  );
+}

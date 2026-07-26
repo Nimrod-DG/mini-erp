@@ -27,10 +27,13 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
-**Phase:** 5 — **DONE** (Session A: requisitions, POs, suppliers, numbering ·
-Session B: the goods receipt, the cross-module transaction)
-**Next action:** open [`phases/phase-6-finance.md`](phases/phase-6-finance.md) in
-a **new session**
+**Phase:** 6 — **DONE** (the finance read side: two endpoints, one page, and the
+receipt confirmation panel's second link)
+**Next action:** open
+[`phases/phase-7-dashboard-seed.md`](phases/phase-7-dashboard-seed.md) in a
+**new session**. Phase 7 is the MVP gate — the seed script, the twenty-five-step
+[acceptance test](acceptance-test.md), and the first time most of this
+application is opened in a browser at all (see below).
 
 ### Every browser walkthrough is deliberately deferred to Phase 7
 
@@ -56,7 +59,7 @@ Never opened in a browser:
 | `/admin/tenants`, `/admin/tenants/new`, `/admin/tenants/:id`, `/settings/users`, `/settings/users/new`, `/settings/users/:id` | Phase 3 |
 | the six procurement screens — requisition list, create, detail, PO list, PO detail, suppliers | Phase 5A |
 | `/procurement/orders/:id/receive` and **the §10.3 confirmation panel** | Phase 5B |
-| `/finance` | Phase 6 |
+| `/finance` — including **both** links out of the confirmation panel, which now exist | Phase 6 |
 
 Walked already, and still worth re-walking at the gate: Phase 2's sign-in and
 Phase 4's six inventory screens.
@@ -81,7 +84,7 @@ Migration files that now exist (`backend/migrations/`), applied in this order by
 | `005_rls_grants.up.sql` | RLS enable/force/policy, grants, ledger and superadmin revokes, `seed_tenant_accounts()` |
 | `006_pr_cancel_from_draft.up.sql` | relaxes `pr_submitted_has_timestamp` so a draft can be cancelled without a submission that never happened — see *Decisions* |
 
-Backend packages as of Phase 5B:
+Backend packages as of Phase 6:
 
 | Package | Contents |
 |---|---|
@@ -91,36 +94,35 @@ Backend packages as of Phase 5B:
 | `internal/httpx` | the §9.8 error envelope (`Fail`, `FailWith`, `Unauthenticated`), the §9.0 list contract (`ParseList`, `ListResponse`), and **`Numeric`** — the exact-decimal type every NUMERIC crosses the wire as |
 | **`internal/docnum`** | **`Allocate(tx, tenant, docType)`** — §8.1 numbering, in the caller's transaction. `AllocateAt` is the same thing with an explicit instant, which is how E5 can fail. Constants `PR` `PO` `GR` `JE` |
 | `internal/db` | pools, `WithTenant`, migrations, and `SQLState` / `IsUniqueViolation` / `ConstraintName` for mapping constraints to business outcomes |
-| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, the sixteen `/inventory/*` handlers, and the **twenty `/procurement/*` handlers**. **`procurement_receipts.go` is §8.4** — the one handler that writes to three modules in one transaction — with its inventory and finance halves in **`inventory_receipt.go`** and **`finance_journal.go`**, both taking the same `tx` |
+| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, the sixteen `/inventory/*` handlers, the twenty `/procurement/*` handlers, and the **two `/finance/*` handlers**. **`procurement_receipts.go` is §8.4** — the one handler that writes to three modules in one transaction — with its inventory and finance halves in **`inventory_receipt.go`** and **`finance_journal.go`**, both taking the same `tx`. **`finance.go` is the finance read side** and is the whole of §9.6 |
 | `testsupport` | `FakeVerifier`, `FakeUsers`, the shared HTTP `Harness` (used by both test packages), the fixtures, and `WithTenantOn` / `NoSuchTenant` |
 
-Frontend routes as of Phase 5B: `/login` `/auth/action` `/` `/admin/tenants`
+Frontend routes as of Phase 6: `/login` `/auth/action` `/` `/admin/tenants`
 `/admin/tenants/new` `/admin/tenants/:id` `/settings/users` `/settings/users/new`
 `/settings/users/:id` `/inventory/products` `/inventory/products/new`
 `/inventory/products/:id` `/inventory/warehouses` `/inventory/stock`
 `/inventory/ledger` `/procurement/requisitions` `/procurement/requisitions/new`
 `/procurement/requisitions/:id` `/procurement/orders` `/procurement/orders/:id`
-**`/procurement/orders/:id/receive`** `/procurement/suppliers`. All signed-in
-screens render inside `AppShell`.
+`/procurement/orders/:id/receive` `/procurement/suppliers` **`/finance`**. All
+signed-in screens render inside `AppShell`.
 
-**Phase 6 (finance) starts from a module that already receives postings.**
-`journal_entries` and `journal_entry_lines` have real rows in them the moment
-anybody receives goods, written by `finance_journal.go` — so `/finance` and
-`GET /api/finance/journal-entries` (§10.5) are a read side over data that already
-exists, not a module built from nothing. `postReceiptJournal` and
-`assertJournalBalances` are the worked example of posting one. Phase 6's build
-item 1, the chart of accounts, **already exists**: `seed_tenant_accounts()` has
-run for every tenant since Phase 1.
+**Every module in the naming contract now has a screen and an entitlement path.**
+`AppShell`'s `modulePaths` holds all three; Finance is the one with no `children`,
+because the module is a single page.
 
-**Phase 6 also closes the one place Phase 5 does not meet its spec.** §10.3 wants
-both lines of the goods receipt confirmation panel to link; the finance one does
-not, because its target is Phase 6's page. The marker is
-**`frontend/src/pages/procurement/ReceiveGoods.tsx` — `TODO(phase-6)` inside
-`ReceiptConfirmation`** — and closing it is wrapping one `<span>` in a `<Link>` to
-`/finance?sourceId=<receipt id>`, the counterpart of the inventory line's
-`/inventory/ledger?sourceId=<receipt id>`. Doing it before `/finance` exists would
-not 404: `App.tsx` redirects unknown paths to the dashboard, so the link would
-quietly land the reader on the home screen.
+**The §10.3 confirmation panel is now complete.** Both of its lines link — the
+inventory one to `/inventory/ledger?sourceId=<receipt id>`, the finance one to
+`/finance?sourceId=<receipt id>` — and each lands on a list filtered to that one
+document. The `TODO(phase-6)` Phase 5 left in `ReceiveGoods.tsx` is gone, and
+there are no `TODO(phase-*)` markers left anywhere in `frontend/src` or
+`backend/internal`.
+
+**What Phase 7 inherits from finance.** `GET /api/finance/journal-entries` takes
+`sourceId`, `accountId`, `sourceType`, `from`, `to`, and the §9.0 list parameters,
+and returns each entry **with its lines** (`journalEntryDetail`, so acceptance
+step "the entry is balanced" is answerable from one response). `GET
+/api/finance/accounts` returns the two seeded rows. Neither has a write
+counterpart and neither should grow one before the real Finance module.
 
 ### What a module phase inherits
 
@@ -155,6 +157,8 @@ read it before building procurement rather than deriving the shape again.
 | Post a journal entry | `postReceiptJournal` in `internal/api/finance_journal.go` is the worked example: `accountByCode` resolves 1300/2150, `docnum.Allocate(tx, …, docnum.JE)` numbers it, and **`assertJournalBalances`** is called before the transaction can commit. Both sums are computed in SQL — never compare two `httpx.Numeric` in Go |
 | Write a cross-module transaction | `createGoodsReceipt` in `procurement_receipts.go`. One `tx`, passed into the other modules' functions. **D8 is the test that proves it**; read its comment before changing step order, because it depends on the ledger being written *before* the journal |
 | Take an idempotency key | `idempotencyKey(c)` plus `receiptByKey` and the `SavePoint`/`RollbackTo` pair in `createGoodsReceipt`. Match the *constraint name*, never bare SQLSTATE `23505` |
+| A list row that carries child rows | `attachJournalLines` in `finance.go` — one query for the page's children, keyed by parent id. A `LEFT JOIN` on the page query multiplies the rows and breaks both the page size and the total; a query per row is 25 round trips. Note the two types: GORM's `Scan` **cannot fill a slice-of-struct field** and errors the whole query, so the scannable row and the row-with-children are separate structs (`journalEntryRow` / `journalEntryDetail`, like `goodsReceiptRow` / `goodsReceiptDetail`) |
+| The banner over a list narrowed by `?sourceId=` | `SourceFilterNotice` from `components/ListStates.tsx`. It owns the URL parameter as well as the banner — `onCleared` is only for the page's own state, which in both callers means resetting to page 1 |
 
 **Trap 1 — a helper must never signal failure by returning what `httpx.Fail`
 returned.** `Fail` returns `nil` deliberately: the body is already written, and
@@ -278,6 +282,12 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 | 2026-07-26 | **`TableHead` and `Column` extracted to `components/ListStates.tsx`**, and all eleven tables in the application adopted it | The receipt form and the receipt history made this the *fourth* copy of the same nineteen lines, and Phase 5A recorded the trigger in as many words: "worth another look if Session B adds a third of either". Only the heading row moved. The cells stay with their screen, because a column's content is where the decisions live — a link target, a deleted-product marker, a signed delta — and a config object rich enough for those would grow a case per column type. `MasterDataList` already had a private copy of exactly this loop, so `Column` moved to sit beside the shared version and `MasterDataList` now renders `<TableHead columns={columns} />` like everything else. Clone groups fell from 15 to 10. **`Column` has exactly one import path**: an `export type { Column }` re-export from `MasterDataList` shipped briefly and was removed — one type reachable by two paths is the same failure as one URL spelled two ways, and it is how a later screen ends up importing the "other" `Column` and nobody noticing they have drifted. `WarehouseList` and `SupplierList` import it from `ListStates` alongside the component that consumes it. |
 | 2026-07-26 | `OrderDetailPage` was split into `OrderSummary`, `OrderLines`, `OrderProgress`, `CancelOrderPanel`, and `ReceiptHistory` | The receipt history and the two Receive-goods entry points took it to 299 lines and 20 cyclomatic — CRITICAL, and worse than `RequisitionDetailPage` was before Session A split it the same way. Now 104 lines and 13. `CancelOrderPanel` owns its own three state variables, because whether a reason box is open is nothing the rest of the screen needs to know. Still labelled CRITICAL, like its requisition twin, and further splitting would fragment a page component for a metric's sake. |
 | 2026-07-26 | **Every browser walkthrough is deferred to Phase 7 and done in one pass**, rather than one per phase | Phase 7's MVP gate is already the full twenty-five-step acceptance test at 360px in both themes, which walks the whole application — so a per-phase walk means walking the same flows five times, and only the last one is performed against the finished thing. The cost is real and is written down rather than glossed: problems then arrive in bulk, and Phase 4's walk found three in an hour on one module. Recorded prominently in *Current state* with the list of screens nobody has opened, because "no walkthrough yet" must not read as an oversight to the session that finds it. |
+| 2026-07-26 | **The journal list returns each entry with its lines**, rather than the entry alone | An entry without its lines is a number and a description; what makes a posting legible is Dr 1300 against Cr 2150, and that is the whole reason §10.5 shows a live list rather than a count. It also makes "the entry is balanced" answerable from one response, which is what Phase 7's acceptance step needs. Cost is one extra query per page (`attachJournalLines`), not one per row. |
+| 2026-07-26 | The entry's `amount` is the **debit** side only, summed in SQL | The credit side is equal by construction — `jel_balanced` is a deferred constraint trigger that refuses to commit anything else — so presenting both as "the amount" would invite somebody to compare them in Go or TypeScript to check. The one place that comparison is made is `assertJournalBalances`, in SQL, where both operands are still NUMERIC (I8). |
+| 2026-07-26 | `GET /finance/journal-entries` takes an `accountId` filter, implemented as an **`EXISTS`** rather than a join | "Which entries touched 1300" is a question about entries, and a join would return an entry twice if it ever debited and credited the same account — inflating both the page and the total. Nothing in the MVP posts such an entry, so this is a shape chosen to be right rather than one a test can currently fail. The filter has a user: the chart-of-accounts chips on `/finance` are what set it. |
+| 2026-07-26 | The Finance page shows the **chart of accounts**, which §10.5 does not ask for | §9.6.1's completeness table marks Accounts *List* ✅ and says in as many words that "every ✅ above needs a working UI, not just an endpoint". Without it `GET /finance/accounts` would be an endpoint no screen calls and `listAccounts` a client function nothing imports — the same unused-symmetry problem that had `getGoodsReceipt`'s wrapper removed in Phase 5B. Two chips above the journal, each filtering it. |
+| 2026-07-26 | Accounts have no `?includeDeleted=true`, unlike every master-data list | The recycle bin exists because things get deleted. Nothing in the MVP deletes an account — there is no endpoint, and §9.6 says the chart is seeded rather than user-managed — so the parameter would be a view onto a state no code path produces. The column is still read (`deleted_at IS NULL`), because D8 soft-deletes `2150` by hand to prove the rollback. |
+| 2026-07-26 | **`SourceFilterNotice` extracted to `components/ListStates.tsx`**, and `LedgerPage` refactored onto it | The finance page's `?sourceId=` banner is the same twenty-five lines as the ledger's with one noun changed, and §4 sets the bar for abstracting at the second concrete use case — which this is, exactly as `MasterDataList` was for suppliers. The component owns the URL parameter as well as the markup: a version where the caller deleted `sourceId` itself would render a button whose behaviour lived in another file. |
 | 2026-07-26 | The local superadmin was provisioned by a throwaway, deleted after use, rather than by `cmd/seed` | Carried from Phase 3 — `/admin/*` had been unreachable by hand for three phases. Phase 7 owns the seed script and §3.5.3 already specifies the deterministic-UID shape it should take, so building it now would be doing that work twice and probably differently. The throwaway followed §3.3's order (provider account first, row second, compensating delete on failure); the account and the SQL are recorded below so the next person does not need the program. |
 
 ---
@@ -1249,3 +1259,101 @@ four worth knowing before Phase 6:
 **Next:** [`phases/phase-6-finance.md`](phases/phase-6-finance.md) in a new
 session. The browser walkthrough is **not** next: it and every other one belong to
 Phase 7's acceptance-test run — see *Current state*.
+
+## Phase 6 — 2026-07-26
+
+**Done:** the Finance module exists, as a stub that does not lie. Two endpoints,
+both `viewer` — `GET /api/finance/journal-entries` and `GET /api/finance/accounts`
+— live in `internal/api/finance.go` and are registered by `registerFinance`, one
+`RequireModule` per route like inventory and procurement. `/finance` renders the
+§10.5 page: the header reads *Finance — coming soon*, the line under it says
+postings from other modules are already flowing in and that reporting and period
+close are not built, and below that is the journal itself, live, each entry shown
+with its Dr/Cr lines and linked back to the goods receipt that posted it.
+
+Build item 1 needed no work: `seed_tenant_accounts()` has run for every tenant
+since Phase 1, and K5 is the test that now says so.
+
+**The §10.3 confirmation panel is finished.** Its finance line is a `Link` to
+`/finance?sourceId=<receipt id>`, the counterpart of the inventory line's
+`/inventory/ledger?sourceId=<receipt id>`. Both claims the panel makes are now one
+click from the rows that back them.
+
+**Tests green:** K1–K7 in `internal/api` (package `api_test`), plus everything
+from Phases 0–5 unchanged — `go test ./... -count=1 -p 1` clean, `go vet` clean,
+`gofmt` clean, `npx tsc --noEmit` clean, `npm run lint` clean (four pre-existing
+fast-refresh warnings), `npm run build` clean.
+
+- **K1** — both routes answer `200` for a finance `viewer` and
+  `403 insufficient_module_role` for an `admin` in another module, asserted
+  against the real app from `api.New`.
+- **K2** — the Phase 6 "done when", second half: a tenant whose Finance
+  entitlement is revoked gets `403 module_not_enabled`, with `details.module`,
+  while the user still holds finance `admin` — so only the entitlement can be
+  doing the refusing.
+- **K3 — the Phase 6 gate, and the one worth reading.** Goods are received
+  through the real procurement endpoint by a procurement `approver`; the entry is
+  then found through the real finance endpoint by Dewi, who holds finance
+  `viewer` and nothing anywhere else. Nothing is shared between the two halves but
+  the database. It asserts the id and number the receipt reported, the amount
+  (3 × 1,500,000), the resolved GR number and PO id, debits equal credits, **and
+  which side is which** — Dr 1300 Inventory, Cr 2150 GRNI, because an entry that
+  balanced with the sides swapped would pass a sum and be visibly wrong.
+- **K4** — two receipts against one order post two entries; `?sourceId=` returns
+  the one the reader clicked, each findable by its own id. Also that `accountId`
+  counts an entry **once** rather than once per line.
+- **K5** — the seeded chart is readable in a workspace nobody has posted into,
+  and a fresh journal is an empty page rather than `null`.
+- **K6** — another tenant sees zero entries, and cannot reach one by asking for
+  it by `sourceId` either. Written because finance is a new surface over three
+  tables and a single-tenant test cannot detect an isolation failure at all.
+- **K7** — six malformed filters, all `400 malformed`, including an unknown
+  `sort` on both endpoints.
+
+**Deviations from spec:** six, all recorded in *Decisions taken* above — entries
+returned with their lines, `amount` as the debit side only, the `EXISTS` account
+filter, the chart of accounts on the page (which §9.6.1 actually requires), no
+`includeDeleted` on accounts, and the `SourceFilterNotice` extraction.
+
+**TODO(post-mvp) markers added:** none.
+
+**TODO(phase-6) markers removed:** the one Phase 5B left in
+`frontend/src/pages/procurement/ReceiveGoods.tsx`. There are now **no
+`TODO(phase-*)` markers anywhere** in `frontend/src` or `backend/internal`. The
+two `TODO(post-mvp)` markers that remain are the whole standing list:
+
+- `backend/internal/api/procurement_receipts.go:412` — audit `gr.posted` (§8.4
+  step 7). *Phase 5B's log records this as line 388; it is 412.*
+- `frontend/src/lib/requisitionForm.ts:48` — replace the product `<select>` with
+  a search-as-you-type picker.
+
+**Known broken / left half-done:**
+
+- **`/finance` has never been opened in a browser**, like most of this
+  application. Deliberate and consolidated into Phase 7 — see *Current state*.
+  Two things on it are worth looking at first, because they are the only markup
+  in the project without a precedent to copy: the Dr/Cr line list inside a table
+  cell at 360px, and the chart-of-accounts chips, which are `aria-pressed`
+  toggles rather than links.
+- **`npx fallow audit` was not run this phase.** `discipline.md` §— asks for it at
+  the end of Phases 4, 5, and 7, and Phase 6 is not one of them. The duplication
+  it would most likely have found was found by hand instead and extracted
+  (`SourceFilterNotice`). The pagination-and-empty-state block is still the
+  largest known clone family — `Pagination` now has nine call sites, eight
+  screens plus `MasterDataList` — and still wants a `DataTable` wrapper rather
+  than another header-sized extraction.
+- **Still no frontend tests at all**, and `/finance` is one more untested screen.
+  §12.5 defines them; Phase 8 is where they live.
+- `go test -race` still cannot run here — no C toolchain on `PATH`. CI runs it.
+- The five inventory-screen readability candidates from Phase 4 are still open,
+  and `OrderList` at 168 lines is still the worst-scoring component in the
+  frontend.
+
+**Next:** [`phases/phase-7-dashboard-seed.md`](phases/phase-7-dashboard-seed.md)
+in a new session. Phase 7 is the MVP gate and is the biggest remaining phase by
+some distance: it owns the seed script (§3.5.3's deterministic UIDs, seven users
+— **including the second procurement `approver` the approval step cannot be
+walked without**), the four dashboard widgets, and the twenty-five-step
+acceptance test at 360px in both themes, which is also the first browser
+walkthrough of nearly every screen in this application. Budget for finding
+things, not for confirming them.

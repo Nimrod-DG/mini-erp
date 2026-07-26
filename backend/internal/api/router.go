@@ -115,6 +115,7 @@ func New(deps Deps) *fiber.App {
 
 	registerInventory(api, s)
 	registerProcurement(api, s)
+	registerFinance(api, s)
 
 	return app
 }
@@ -220,6 +221,28 @@ func registerProcurement(api fiber.Router, s *server) {
 	// orders are cancelled, never removed (§6.9.2, I5), and §9.6.1 says in as
 	// many words not to add one for symmetry. The route not existing is the
 	// enforcement.
+}
+
+// registerFinance mounts §9.6 — two routes, both `viewer`, both reads.
+//
+// The Finance UI is a "coming soon" page (§10.5) and these endpoints still have
+// to work: they are how the goods-receipt demo proves a journal entry was
+// written, and a stub whose endpoints do not answer proves nothing.
+//
+// There is no POST here on purpose. Manual journal entry, account CRUD, period
+// close, and every report are out of scope (§9.6) — and accounts specifically
+// are seeded rather than user-managed, because an editable chart needs rules
+// about accounts that already carry postings.
+func registerFinance(api fiber.Router, s *server) {
+	fin := api.Group("/finance")
+
+	at := func(min identity.RoleLevel) fiber.Handler {
+		return middleware.RequireModule(ModuleFinance, min)
+	}
+	viewer := identity.RoleViewer
+
+	fin.Get("/journal-entries", at(viewer), s.listJournalEntries)
+	fin.Get("/accounts", at(viewer), s.listAccounts)
 }
 
 // errorHandler renders anything that escapes a handler in the §9.8 envelope.

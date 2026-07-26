@@ -43,9 +43,9 @@ function navItems(me: Me): NavItem[] {
 
   const items: NavItem[] = [{ to: "/", label: "Dashboard" }];
 
-  // Finance arrives in Phase 6. The entitlement filter is already the real one,
-  // so that phase adds a path here and nothing else: an item with nowhere to go
-  // is left out rather than linking at a route that redirects.
+  // One entry per module the tenant is entitled to and the user holds a level
+  // in. Finance has no children: the module is a single page (§10.5), and a
+  // sub-list of one repeats the item above it.
   const modulePaths: Partial<Record<ModuleCode, NavItem>> = {
     procurement: {
       // Requisitions first, because that is where buying starts: an order is not
@@ -67,6 +67,10 @@ function navItems(me: Me): NavItem[] {
         { to: "/inventory/ledger", label: "Ledger" },
         { to: "/inventory/warehouses", label: "Warehouses" },
       ],
+    },
+    finance: {
+      to: "/finance",
+      label: "Finance",
     },
   };
   for (const module of MODULES) {

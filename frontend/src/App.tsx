@@ -17,6 +17,7 @@ import { ResetPassword } from "./pages/ResetPassword";
 import { TenantDetailPage } from "./pages/admin/TenantDetail";
 import { TenantList } from "./pages/admin/TenantList";
 import { TenantNew } from "./pages/admin/TenantNew";
+import { FinancePage } from "./pages/finance/FinancePage";
 import { LedgerPage } from "./pages/inventory/LedgerPage";
 import { ProductDetailPage } from "./pages/inventory/ProductDetail";
 import { ProductList } from "./pages/inventory/ProductList";
@@ -278,6 +279,21 @@ export default function App() {
                   <Signed>
                     <RequireModule module="inventory">
                       <LedgerPage />
+                    </RequireModule>
+                  </Signed>
+                }
+              />
+
+              {/* Finance (§10.5). One route, and the stub is the whole module:
+                the endpoints behind it are real, the page is honest about the
+                rest not being built. Gated like every other module, cosmetically
+                here and for real in RequireModule server-side (I12). */}
+              <Route
+                path="/finance"
+                element={
+                  <Signed>
+                    <RequireModule module="finance">
+                      <FinancePage />
                     </RequireModule>
                   </Signed>
                 }

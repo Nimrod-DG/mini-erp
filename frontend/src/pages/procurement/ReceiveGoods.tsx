@@ -346,9 +346,10 @@ function ReceiveRow({
  * itself rebuilt from the committed rows — so the panel cannot claim something the
  * database does not say happened.
  *
- * The inventory line links to the ledger rows this receipt wrote. The finance line
- * does not link yet — see the `TODO(phase-6)` on it, which is the one place §10.3
- * is not fully met and says exactly what closes it.
+ * Both lines link, as §10.3 asks: the inventory line to the ledger rows this
+ * receipt wrote, the finance line to the journal entry it posted. Each lands on
+ * a list filtered to this one document, so every claim the panel makes is one
+ * click from the rows that back it.
  */
 function ReceiptConfirmation({ result }: { result: ReceiptResult }) {
   const { receipt, purchaseOrder, inventory, finance } = result;
@@ -384,20 +385,18 @@ function ReceiptConfirmation({ result }: { result: ReceiptResult }) {
           </li>
           <li className="flex flex-wrap items-baseline gap-2">
             <span className="text-secondary">→ Finance:</span>
-            {/* TODO(phase-6): make this a Link to `/finance?sourceId=${receipt.id}`,
-                the exact counterpart of the inventory line above. §10.3 wants both
-                lines to link and this is the only reason one of them does not:
-                `/finance` (§10.5) is Phase 6's page, and App.tsx redirects unknown
-                paths to the dashboard — so linking early would not 404, it would
-                quietly land the reader on the home screen, which is worse in the
-                screenshot this panel exists for. Phase 6's own "done when" is that
-                a Phase 5 receipt shows up as a balanced entry on that page, so this
-                is the seam where the two phases meet. Nothing else changes: the
-                entry number and both amounts below are already here. */}
-            <span>
+            {/* The counterpart of the inventory line above, closed in Phase 6
+                when `/finance` came to exist (§10.5). Both lines of §10.3's
+                panel now link, and both land on a filtered list showing exactly
+                what this receipt wrote — the claim and the evidence are one
+                click apart on each side. */}
+            <Link
+              to={`/finance?sourceId=${receipt.id}`}
+              className="text-accent underline decoration-hairline underline-offset-2"
+            >
               journal entry{" "}
               <span className="tabular">{finance.entryNumber}</span> posted
-            </span>
+            </Link>
             <span className="tabular text-secondary">
               (Dr {finance.debitAccountName} {formatMoney(finance.amount)} / Cr{" "}
               {finance.creditAccountName} {formatMoney(finance.amount)})

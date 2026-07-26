@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../lib/api";
 
@@ -147,6 +148,66 @@ export function EmptyState({
         </td>
       </tr>
     </tbody>
+  );
+}
+
+/**
+ * The banner over a list narrowed to one source document by `?sourceId=`.
+ *
+ * Both halves of the goods receipt confirmation panel link to a list this way —
+ * the stock ledger's rows and the journal's entry (§10.3) — and the reader
+ * arriving there has to be told why they are looking at two rows out of
+ * thousands, and given the way back. Shared because it is the same banner twice,
+ * with the noun changed.
+ *
+ * It owns the parameter as well as the banner: clearing the filter is removing
+ * `sourceId` from the URL, and a version where the caller did that itself would
+ * be a component that renders a button whose behaviour lives somewhere else.
+ * `onCleared` is for the page's own state — the page number, which has to go
+ * back to one.
+ */
+export function SourceFilterNotice({
+  sourceNumber,
+  showing,
+  clearLabel,
+  onCleared,
+}: {
+  /** The document's number, once the first row has resolved it. Null until
+   *  then: the banner appears immediately and names the document when it can,
+   *  rather than waiting and shifting the table down a moment later. */
+  sourceNumber: string | null;
+  showing: string;
+  clearLabel: string;
+  onCleared: () => void;
+}) {
+  const [params, setParams] = useSearchParams();
+  if (!params.get("sourceId")) return null;
+
+  return (
+    <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3 rounded-lg border border-hairline bg-raised px-4 py-3 text-sm">
+      <span>
+        Showing only {showing}
+        {sourceNumber && (
+          <>
+            {" — "}
+            <span className="tabular">{sourceNumber}</span>
+          </>
+        )}
+        .
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          const next = new URLSearchParams(params);
+          next.delete("sourceId");
+          setParams(next, { replace: true });
+          onCleared();
+        }}
+        className="text-accent underline decoration-hairline underline-offset-2"
+      >
+        {clearLabel}
+      </button>
+    </div>
   );
 }
 
