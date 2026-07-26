@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: erp_migrate
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: erp
+      TZ: UTC
+      PGTZ: UTC
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/migrations/000_roles.sql:/docker-entrypoint-initdb.d/000_roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_migrate -d erp"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:

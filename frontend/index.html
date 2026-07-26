@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mini-erp</title>
+    <!-- The only place these two values are duplicated outside globals.css, and
+         deliberately so. The script below sets the class before first paint,
+         but in dev Vite injects the stylesheet via JS *after* it — so without
+         an inline rule the first frame is still browser-default white. Canvas
+         only; everything else waits for the tokens. -->
+    <style>
+      html { background-color: #FBFBFA; }
+      html.dark { background-color: #0E1114; }
+    </style>
+    <!-- Blocking, and it must stay blocking: it runs before first paint, so a
+         dark-mode user does not get a white flash on every page load. -->
+    <script>
+      (function () {
+        var s = localStorage.getItem('theme') || 'system';
+        var dark = s === 'dark' ||
+          (s === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

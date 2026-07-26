@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/* Self-hosted, so there is no CDN request and no offline failure.
+   Inter carries the UI; JetBrains Mono carries every number, document number
+   and SKU — the numeric face is where this interface gets its identity. */
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* ---------------------------------------------------------------------------
+   Semantic tokens — named by role, never by appearance.
+   Components reference the role and never know which theme is active, which is
+   why there is not a single `dark:` modifier anywhere in this codebase.
+
+   Raw channel values (23 25 28, not #17191C) so Tailwind can apply opacity
+   modifiers like bg-surface/60.
+
+   The `--ch-` prefix is deliberate. The reference doc names these `--color-*`,
+   but `@theme` below emits `--color-accent: rgb(var(--color-accent))` into the
+   same `:root`, and a custom property that references itself is a cycle: the
+   declaration becomes invalid and every accent/success/warning/danger utility
+   silently stops resolving. Separate namespaces, no cycle.
+   ------------------------------------------------------------------------ */
+:root {
+  --ch-bg-canvas:      251 251 250;   /* #FBFBFA */
+  --ch-bg-surface:     255 255 255;
+  --ch-bg-raised:      255 255 255;
+  --ch-text-primary:    23  25  28;   /* #17191C */
+  --ch-text-secondary: 100 103 108;
+  --ch-border:         229 229 227;
+  --ch-accent:          15 110 110;   /* #0F6E6E petrol */
+  --ch-success:         21 128  61;
+  --ch-warning:        180  83   9;
+  --ch-danger:         185  28  28;
+}
+
+/* Accent, success, warning and danger take *different* values per theme, not
+   one value reused. Saturated colours that read well on white vibrate on
+   near-black; reusing them is the most common dark-mode mistake. */
+.dark {
+  --ch-bg-canvas:       14  17  20;   /* #0E1114 */
+  --ch-bg-surface:      24  27  31;   /* #181B1F */
+  --ch-bg-raised:       32  36  41;
+  --ch-text-primary:   244 244 243;
+  --ch-text-secondary: 163 163 160;
+  --ch-border:          51  56  62;
+  --ch-accent:          79 179 179;   /* #4FB3B3 petrol, lightened for dark */
+  --ch-success:         74 222 128;
+  --ch-warning:        251 191  36;
+  --ch-danger:         248 113 113;
+}
+
+/* Non-inline @theme on purpose. `@theme inline` bakes the values in at build
+   time, which breaks runtime switching — the classic symptom is a toggle that
+   changes nothing. Custom properties resolve at runtime, which is exactly why
+   they are the right tool here. */
+@theme {
+  --color-canvas:    rgb(var(--ch-bg-canvas));
+  --color-surface:   rgb(var(--ch-bg-surface));
+  --color-raised:    rgb(var(--ch-bg-raised));
+  --color-primary:   rgb(var(--ch-text-primary));
+  --color-secondary: rgb(var(--ch-text-secondary));
+  --color-hairline:  rgb(var(--ch-border));
+  --color-accent:    rgb(var(--ch-accent));
+  --color-success:   rgb(var(--ch-success));
+  --color-warning:   rgb(var(--ch-warning));
+  --color-danger:    rgb(var(--ch-danger));
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", monospace;
+
+  /* A restrained scale. Hierarchy in dense screens comes from weight. */
+  --text-xs:   0.75rem;   /* 12 */
+  --text-sm:   0.875rem;  /* 14 */
+  --text-base: 1rem;      /* 16 */
+  --text-lg:   1.25rem;   /* 20 */
+  --text-xl:   1.75rem;   /* 28 */
+}
+
+@layer base {
+  html,
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-primary);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Numbers are the content: digits must align vertically down a column. */
+  .tabular,
+  td.numeric,
+  th.numeric {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Keyboard users get a ring; mouse users do not get one on every click. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+  }
+}
