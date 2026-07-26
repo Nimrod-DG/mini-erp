@@ -10,6 +10,15 @@ secrets/
 .env
 .env.*
 !.env.example
+# The Phase 9 deployment templates. Same rule as .env.example: same keys,
+# no credentials. frontend/.env.production itself stays ignored by the line
+# above, because it names a deployment rather than describing one.
+!.env.production.example
+# A filled-in copy of deploy/neon-bootstrap.sql holds three real passwords.
+deploy/*.filled.sql
+# deploy/prod.env holds the two production connection strings. The committed
+# deploy/cloudrun.env.yaml is the one with nothing secret in it.
+deploy/*.env
 
 # --- go ----------------------------------------------------------------------
 /backend/bin/
@@ -20,6 +29,8 @@ secrets/
 
 # --- node --------------------------------------------------------------------
 node_modules/
+# The Firebase CLI's per-deploy upload cache. Machine-local build state.
+.firebase/
 /frontend/dist/
 /frontend/.vite/
 npm-debug.log*

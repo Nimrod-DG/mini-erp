@@ -9,6 +9,7 @@ original except for the sixteen corrections listed in [`AUDIT.md`](AUDIT.md).
 | File | When |
 |---|---|
 | [`PROGRESS.md`](PROGRESS.md) | Every session, first thing. Current state. |
+| [`DEPLOY.md`](DEPLOY.md) | **The Phase 9 runbook.** Neon + Cloud Run + Firebase Hosting, across two Google accounts, step by step. Read it instead of deriving the commands from the reference docs. |
 | [`AUDIT.md`](AUDIT.md) | Optional. Record of the 16 problems found in the original plan and how each was fixed. Nothing outstanding. |
 | [`00-scope.md`](00-scope.md) | Once, at Phase 0. What is and is not MVP. |
 | [`phases/`](phases/) | One file per phase. The build instructions. |

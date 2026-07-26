@@ -49,13 +49,17 @@ func Load() (*Config, error) {
 		CORSOrigins:        splitCSV(envOr("CORS_ORIGINS", "http://localhost:5173")),
 	}
 
+	// MIGRATE_DATABASE_URL is deliberately absent from this list: it is the
+	// schema owner's credential, and only cmd/migrate has any use for it.
+	// Requiring it here would mean the deployed API service carried a
+	// connection string that can DROP its own tables in order to boot — see
+	// requireMigrateURL, which is how cmd/migrate demands it instead.
 	for _, missing := range []struct {
 		key   string
 		value string
 	}{
 		{"DATABASE_URL", c.DatabaseURL},
 		{"ADMIN_DATABASE_URL", c.AdminDatabaseURL},
-		{"MIGRATE_DATABASE_URL", c.MigrateDatabaseURL},
 		// Required from Phase 2: without it the Admin SDK cannot check a
 		// token's audience, and the API cannot serve one authenticated request.
 		{"FIREBASE_PROJECT_ID", c.FirebaseProjectID},
@@ -66,6 +70,47 @@ func Load() (*Config, error) {
 	}
 
 	return c, nil
+}
+
+// LoadFrom reads an extra env file first, overriding the process environment,
+// and then Load.
+//
+// The deployment commands — migrate, seed, dbverify — take a path as an
+// optional argument so that pointing one at the deployed database is
+// `go run ./cmd/migrate .env.production` rather than five exported variables
+// in whichever shell the operator happens to be in. An empty path is Load.
+func LoadFrom(path string) (*Config, error) {
+	if path != "" {
+		if err := godotenv.Overload(path); err != nil {
+			return nil, fmt.Errorf("config: read %s: %w", path, err)
+		}
+	}
+	return Load()
+}
+
+// LoadCLI is LoadFrom with the path taken from the command line. The three
+// deployment commands accept an optional env file as their only argument:
+//
+//	go run ./cmd/migrate                  # backend/.env, the local database
+//	go run ./cmd/migrate .env.production  # the deployed one
+//
+// The API deliberately does not: a server takes its configuration from its
+// environment, and Cloud Run has no files to point at.
+func LoadCLI() (*Config, error) {
+	var path string
+	if len(os.Args) > 1 {
+		path = os.Args[1]
+	}
+	return LoadFrom(path)
+}
+
+// RequireMigrateURL returns the schema owner's connection string, or an error
+// naming it. cmd/migrate calls this; nothing else may.
+func (c *Config) RequireMigrateURL() (string, error) {
+	if c.MigrateDatabaseURL == "" {
+		return "", fmt.Errorf("config: MIGRATE_DATABASE_URL is required to run migrations (see backend/.env.example)")
+	}
+	return c.MigrateDatabaseURL, nil
 }
 
 func envOr(key, fallback string) string {

@@ -1,0 +1,74 @@
+# Render Blueprint for the backend. Phase 9 alternative to Cloud Run.
+#
+# Use it with Render → New → Blueprint, pointed at this repository, rather than
+# filling the "New Web Service" form by hand: the form has eight fields and
+# getting rootDir or the region wrong is a silent performance problem rather
+# than an error.
+#
+# The frontend is NOT here. It goes to Firebase Hosting (frontend/firebase.json),
+# and the database is Neon. This file is only the API.
+#
+# Two things still have to be done in the dashboard, because neither can live in
+# a repository:
+#
+#   1. The two connection strings, marked `sync: false` below. Render prompts for
+#      them when the Blueprint is first applied.
+#   2. The Firebase service-account key, as a SECRET FILE named
+#      `firebase-key.json`. Render mounts secret files at /etc/secrets/<name>,
+#      which is what GOOGLE_APPLICATION_CREDENTIALS points at. It is a file
+#      rather than a variable because the Admin SDK reads a path.
+#
+# See docs/DEPLOY.md §6B.
+
+services:
+  - type: web
+    name: mini-erp-api
+    runtime: docker
+
+    # Free instances sleep after 15 minutes idle and take roughly 30 seconds to
+    # wake. Stacked on free-tier Neon's own suspend, a demo opened cold can take
+    # a while to render its first screen — hit it once before showing anyone.
+    plan: free
+
+    # Singapore, to sit beside Neon's ap-southeast-1. Every request in this
+    # design makes several database round trips, so cross-region latency
+    # multiplies rather than adds.
+    region: singapore
+
+    # I13: one repo, two applications. The API is built from backend/, which is
+    # also where its Dockerfile expects its build context to be.
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+
+    # Cheap, unauthenticated, and touches no database — see internal/api. Render
+    # uses it to decide a deploy succeeded, so a wrong path here means every
+    # deploy is marked failed while the service is in fact healthy.
+    healthCheckPath: /api/health
+
+    envVars:
+      # PORT is set by Render and read by config.Load; do not declare it.
+      # TZ=UTC is already in the image (I7).
+
+      - key: FIREBASE_PROJECT_ID
+        value: erp-project-b66ce
+
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/firebase-key.json
+
+      # The two Firebase Hosting origins and nothing else. No wildcard (§2.3).
+      - key: CORS_ORIGINS
+        value: https://erp-project-b66ce.web.app,https://erp-project-b66ce.firebaseapp.com
+
+      # sync: false keeps these out of git — Render asks for them once and then
+      # stores them itself. Both are the Neon POOLED endpoint (`-pooler` in the
+      # hostname); the direct one is for migrations, which never run here.
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_DATABASE_URL
+        sync: false
+
+      # MIGRATE_DATABASE_URL is deliberately absent. The schema owner's
+      # credential has no business on a running service, and config.Load no
+      # longer requires it — migrations run from a laptop against the direct
+      # endpoint. A service that can rewrite its own schema is a service one bad
+      # deploy away from losing the database.

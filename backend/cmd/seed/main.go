@@ -56,7 +56,7 @@ func main() {
 			"will then exist in the database and be unable to sign in.")
 	flag.Parse()
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadCLI()
 	if err != nil {
 		log.Fatal(err)
 	}

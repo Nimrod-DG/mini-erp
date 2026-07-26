@@ -55,6 +55,21 @@ At Phase 9 only the *values* change: `sslmode=require`, `MIGRATE_DATABASE_URL`
 pointed at an unpooled endpoint, and the credentials moved to Secret Manager
 (§2.4.1). The keys stay identical.
 
+**What Phase 9 added, once it was built** — see [`../DEPLOY.md`](../DEPLOY.md):
+
+- `backend/.env.production` (gitignored) holds the same keys with the Neon
+  **direct** URLs. `migrate`, `seed` and `dbverify` each take it as an argument
+  — `go run ./cmd/migrate .env.production` — and its values override anything
+  exported in the shell, so there is no way to run them against the local
+  database by accident.
+- **`MIGRATE_DATABASE_URL` is no longer required by the API.** It is the schema
+  owner's credential and only `cmd/migrate` has any use for it; the deployed
+  service is not given a connection string that can drop its own tables.
+  `config.RequireMigrateURL` is how `cmd/migrate` demands it instead.
+- `frontend/.env.production` (gitignored, template committed as
+  `.env.production.example`) holds `VITE_API_BASE_URL`. Vite loads it *on top
+  of* `.env.local`, so the dev URL cannot leak into a release build.
+
 ---
 
 ## `frontend/.env.local`

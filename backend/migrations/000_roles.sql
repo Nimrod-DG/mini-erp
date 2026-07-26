@@ -6,12 +6,37 @@
 -- applied on first boot: the tables do not exist yet. The whole file is
 -- therefore written to be idempotent.
 --
--- erp_migrate  the container superuser — owns the schema, runs migrations only
+-- erp_migrate  the schema owner — owns the DDL, runs migrations only
 -- erp_app      the application role — RLS applies to it, always
 -- erp_admin    the platform-admin role — see reference/tenancy-and-rls.md
 --
 -- Neither erp_app nor erp_admin may ever hold BYPASSRLS or SUPERUSER (I3).
+--
+-- ---------------------------------------------------------------------------
+-- WHY THIS FILE IS DEFENSIVE (Phase 9)
+--
+-- It runs in two places that grant very different privileges:
+--
+--   * locally, as the container superuser, where every statement below is
+--     permitted; and
+--   * against a managed host, where `make migrate` re-runs it as erp_migrate —
+--     which is NOT a superuser there, and PostgreSQL requires superuser to
+--     create a role or to touch the SUPERUSER/BYPASSRLS attributes *even to
+--     turn them off*. Run as written, the previous version of this file
+--     aborted the migration on a managed host with `must be superuser to alter
+--     superuser roles`, which reads like a schema problem and is not one.
+--
+-- So every privileged step is attempted and skipped when refused, and the part
+-- that actually matters — I3 — is asserted from pg_roles afterwards, which
+-- needs no privilege at all. That is the stronger arrangement anyway: forcing
+-- an attribute and asserting it are not the same claim, and only the assertion
+-- fails loudly when a role was provisioned by hand through a console.
+--
+-- `deploy/neon-bootstrap.sql` performs the skipped steps once, as the
+-- provider's own owner role. See docs/DEPLOY.md step 3.
+-- ---------------------------------------------------------------------------
 
+-- 1. The roles themselves.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_app') THEN
@@ -20,21 +45,81 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_admin') THEN
     CREATE ROLE erp_admin LOGIN PASSWORD 'localdev' NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
   END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'cannot CREATE ROLE here — expected on a managed host, where deploy/neon-bootstrap.sql creates them';
 END
 $$;
 
--- Re-asserted on every run: a role that somehow acquired either attribute is a
--- silent, total loss of tenant isolation, not a warning.
-ALTER ROLE erp_app   NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
-ALTER ROLE erp_admin NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
+-- 2. Re-assert the attributes. Superuser-only, so attempted and skipped; step 3
+-- is what catches a role that acquired either attribute anyway.
+DO $$
+BEGIN
+  ALTER ROLE erp_app   NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  ALTER ROLE erp_admin NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'cannot ALTER ROLE attributes here — asserted instead, below';
+END
+$$;
 
-GRANT CONNECT ON DATABASE erp TO erp_app, erp_admin;
-GRANT USAGE ON SCHEMA public TO erp_app, erp_admin;
+-- 3. THE ASSERTION, and the reason the two blocks above are allowed to fail.
+--
+-- A role that somehow acquired either attribute is a silent, total loss of
+-- tenant isolation — nothing looks wrong, every policy simply stops applying.
+-- Test A10 asserts the same thing from Go against the test container;
+-- `cmd/dbverify` runs it against a deployed database (Phase 9).
+DO $$
+DECLARE
+  missing  text;
+  elevated text;
+BEGIN
+  SELECT string_agg(r, ', ') INTO missing
+  FROM unnest(ARRAY['erp_app', 'erp_admin']) AS r
+  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
 
--- Pin timezone to the role so it travels with the connection (Section 2.5.2)
-ALTER ROLE erp_app     SET timezone = 'UTC';
-ALTER ROLE erp_admin   SET timezone = 'UTC';
-ALTER ROLE erp_migrate SET timezone = 'UTC';
+  IF missing IS NOT NULL THEN
+    RAISE EXCEPTION 'role(s) % do not exist and could not be created — run deploy/neon-bootstrap.sql against this database first', missing;
+  END IF;
+
+  SELECT string_agg(rolname, ', ') INTO elevated
+  FROM pg_roles
+  WHERE rolname IN ('erp_app', 'erp_admin') AND (rolsuper OR rolbypassrls);
+
+  IF elevated IS NOT NULL THEN
+    RAISE EXCEPTION 'I3 violated: % holds SUPERUSER or BYPASSRLS — every RLS policy in this schema is decorative until that is fixed', elevated;
+  END IF;
+END
+$$;
+
+-- 4. Connect and schema usage.
+--
+-- current_database() rather than the literal `erp`: the local container's
+-- database is named erp, and a managed host's may not be. Hard-coding it makes
+-- this file fail with `database "erp" does not exist` on a provider whose
+-- database is called something else.
+DO $$
+BEGIN
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO erp_app, erp_admin', current_database());
+  GRANT USAGE ON SCHEMA public TO erp_app, erp_admin;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'cannot grant CONNECT/USAGE here — deploy/neon-bootstrap.sql does it once';
+END
+$$;
+
+-- 5. Pin timezone to the role so it travels with the connection (Section 2.5.2).
+-- This is the half of J1 that survives a managed host whose containers you do
+-- not control, so it warns rather than skipping silently.
+DO $$
+BEGIN
+  ALTER ROLE erp_app     SET timezone = 'UTC';
+  ALTER ROLE erp_admin   SET timezone = 'UTC';
+  ALTER ROLE erp_migrate SET timezone = 'UTC';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    RAISE WARNING 'cannot pin role timezones here — deploy/neon-bootstrap.sql must have done it; confirm with cmd/dbverify (J1)';
+  WHEN undefined_object THEN
+    RAISE WARNING 'erp_migrate does not exist — the schema owner is named something else on this host; pin its timezone by hand (J1)';
+END
+$$;
 
 -- --------------------------------------------------------------------------
 -- Platform-table grants (AUDIT A1).
@@ -45,7 +130,9 @@ ALTER ROLE erp_migrate SET timezone = 'UTC';
 -- verified Firebase UID.
 --
 -- Skipped on first boot — the tables arrive with the Phase 1 migrations — and
--- applied when `make migrate` re-runs this file afterwards.
+-- applied when `make migrate` re-runs this file afterwards. These need only
+-- table ownership, which erp_migrate has on every host, so they are not
+-- wrapped in a privilege guard: a failure here is real.
 -- --------------------------------------------------------------------------
 DO $$
 BEGIN

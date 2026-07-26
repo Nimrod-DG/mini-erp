@@ -16,9 +16,12 @@ Filled in as they are established, so a later session does not go hunting.
 | Firebase dev service account | `backend/secrets/erp-project-b66ce-firebase-adminsdk-fbsvc-47d25660f5.json` (gitignored, never committed) |
 | Sign-in provider | Email/Password, enabled and the only one — confirmed 2026-07-26 |
 | Password reset | **Working, confirmed by the user 2026-07-26.** The emailed link opens Firebase's hosted page, not this app's `/auth/action` — see the Phase 2 log and the Phase 9 note about `callbackUri` |
-| Firebase **prod** project ID | *not created — Phase 9* |
-| Hosting site | `erp-project-b66ce`, auto-linked at app registration, unused until Phase 9 |
-| Database host | local Docker (Phase 0–8); host chosen at Phase 9 |
+| Firebase **prod** project ID | **none, deliberately** — the deployment reuses the dev project so the seeded demo accounts work on the live URL. See *Decisions* |
+| Hosting site | `erp-project-b66ce`, auto-linked at app registration; Phase 9 deploys to it |
+| Database host | local Docker (Phase 0–8); **Neon** Postgres 17, AWS `ap-southeast-1`, database `erp` (Phase 9) |
+| Cloud Run project | `banded-torus-476311-q1` — **a different Google account from the Firebase project.** Display name renameable, project ID immutable |
+| Cloud Run service | `mini-erp-api`, region `asia-southeast1` (Singapore, to match Neon) |
+| The deployment runbook | [`DEPLOY.md`](DEPLOY.md) — read that, not the reference docs, when deploying |
 
 Wherever the docs say `erp-dev`, read `erp-project-b66ce`.
 Config values live in [`reference/env-setup.md`](reference/env-setup.md).
@@ -27,21 +30,27 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
-**Phase:** 8 — **all but one box done.** The MVP gate was crossed at Phase 7.5;
-this phase added the frontend suite, CI, the container images, and the coverage
-work §12.6 asks for. Everything runs green locally.
+**Phase:** 9 — **the repository half is done and rehearsed; nothing is deployed
+yet.** Everything that had to change in code, SQL or configuration for this
+application to run on Neon + Cloud Run + Firebase Hosting now exists and has been
+proven against a database shaped like the real one. What remains is entirely
+account work: creating the Neon project, enabling billing, and running the
+commands in [`DEPLOY.md`](DEPLOY.md) — none of which can be done from here,
+because the two Google accounts involved are the developer's.
 
-| Phase 8 "done when" | State |
+| Phase 9 "done when" | State |
 |---|---|
-| FE1–FE26 green | **Done** — the twenty §12.5 assigns to this phase, as 102 Vitest tests. FE16–FE21 are Phase 11's, with the audit log |
-| CI green on a pull request | **Not verifiable here.** The workflow exists and every step was run by hand; `govulncheck` cannot be installed on this machine and the workflow itself needs a push |
-| Coverage meets §12.6 | **4 of 6 targets met.** `procurement` 80.6% and `internal/db` 88.5% are short, and 88% of what remains uncovered in them is `if err != nil` database plumbing — see the Phase 8 log for why chasing it needs fault injection and why that was declined |
+| Acceptance test against the **deployed** URLs | **Not started** — nothing is deployed |
+| Test A10 against the production database | **Tooling built and rehearsed.** `cmd/dbverify` is the runnable form; it passed against a non-superuser-owner Postgres 17, which is Neon's shape |
+| Test J1 against the production database | Same — `dbverify` checks all three roles |
 
-Phase 7.5's deferred findings 6, 7 and 9 are all fixed. Finding 8 was confirmed
-deferred against §10.7.3's explicit list, not forgotten.
+Phase 8's remaining box, **CI green on a pull request**, is still open and still
+cannot be checked from this machine. It is worth having green *before* the
+deploy: `go test -race` has never run anywhere, and the only real concurrency in
+the system is the goods receipt's `FOR UPDATE` and its savepoint/rollback pair.
 
-**Next action:** open a pull request and watch the workflow. That is the one
-remaining box, and it cannot be checked from this machine. Then Phase 9.
+**Next action:** follow [`DEPLOY.md`](DEPLOY.md) from §2. The database steps
+(§2–§4) are independent of the GCP account work and are the ones to do first.
 
 ### What was and was not verified at Phase 7.5
 
@@ -315,6 +324,10 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 
 | Date | Decision | Why |
 |---|---|---|
+| 2026-07-26 | **The deployment authenticates against the *dev* Firebase project, and the demo accounts are seeded into it.** `phases/phase-9-deployment.md` step 7 and `reference/auth.md` §3.5.1 both say the opposite | This is a portfolio deployment, and the thing it has to do is let somebody who has no credentials from the developer sign in and walk the acceptance test. A clean `erp-prod` pool would mean handing out a password by hand to every reader. The dev project already holds the eight §15 accounts at deterministic UIDs. The cost is stated rather than hidden: the live URL is a demo, `password123` is public, and nothing real goes in it. If the application ever holds real records, this is the first decision to reverse — nothing depends on it but two env vars. |
+| 2026-07-26 | **I3 is asserted for `erp_app` and `erp_admin`, and *reported* for `erp_migrate`** | The open question Phase 8 wrote down. Locally `erp_migrate` **is** the container's superuser — `docker-compose.yml` boots Postgres as it and nothing else could create the schema — so a hard assertion would fail every local run, and a check that always fails is a check nobody reads. On a managed host it is an ordinary role and 005's `FORCE ROW LEVEL SECURITY` is exactly what lets the owner be unprivileged. So `cmd/dbverify` fails on the two application roles and warns on the owner, and the warning is a finding in a deployment. |
+| 2026-07-26 | **`000_roles.sql` no longer forces the role attributes it asserts**, and `GRANT CONNECT` names `current_database()` rather than the literal `erp` | The file is re-applied by `make migrate` on every run, including against a managed host where the migrate role is not a superuser. PostgreSQL requires superuser to touch `SUPERUSER`/`BYPASSRLS` **even to turn them off**, and to `ALTER ROLE` a role you have no ADMIN on — so the previous file aborted the first production migration with `must be superuser to alter superuser roles`, an error that reads like a schema fault. Every privileged statement is now attempted and skipped, and I3 is asserted from `pg_roles` afterwards, which needs no privilege. That is the stronger claim anyway: forcing an attribute and checking it are not the same thing, and only the check catches a role provisioned through a console. |
+| 2026-07-26 | **`config.Load` no longer requires `MIGRATE_DATABASE_URL`**; `cmd/migrate` demands it through `RequireMigrateURL` | It is the schema owner's credential. Requiring it to boot would mean the deployed Cloud Run service carried a connection string that can drop its own tables, purely to satisfy a validation loop. The separation was already the design — "a running service must never be able to change its own schema" — and this makes it true of the process environment as well. |
 | 2026-07-26 | Raw colour tokens are named `--ch-*`, not `--color-*` as in `reference/design-system.md` §10.8.1 | The doc's `:root` block and its `@theme` block both define `--color-accent` (also `-success`, `-warning`, `-danger`). Tailwind emits `--color-accent: rgb(var(--color-accent))` into the same `:root`, which is a self-referential cycle: the declaration is invalid and every accent/success/warning/danger utility silently stops resolving. Only the raw side was renamed; the utility names (`text-accent`, `bg-surface`) are unchanged, so no later phase is affected. |
 | 2026-07-26 | `000_roles.sql` guards its platform-table grants behind `to_regclass('public.users') IS NOT NULL`, and `make migrate` re-runs the file after migrations | The file runs from `docker-entrypoint-initdb.d` on first boot, when `users`/`tenants`/etc. do not exist yet. Ungrarded, the AUDIT A1 grants abort container init. The whole file is idempotent so re-running is safe, and the grants land as soon as Phase 1 has created the tables. |
 | 2026-07-26 | Test A10's query uses `rolsuper`, not `rolsuperuser` | `pg_roles` has no `rolsuperuser` column — the query as written in `phases/phase-0-foundations.md` and `reference/deployment.md` errors out. Worth correcting in the acceptance test before Phase 7 relies on it. |
@@ -2063,3 +2076,152 @@ versus `erp_migrate`'s `SUPERUSER`** — on a managed instance that role is
 provisioned by hand, so the deploy is the moment to either narrow I3 or test the
 migration role too — and the `react-router` **RSC-mode** advisory, which does not
 apply to this SPA but will keep showing up in `npm audit`.
+
+---
+
+## Phase 9, Session A — 2026-07-26
+
+**Nothing is deployed.** This session did the half of Phase 9 that lives in the
+repository, and rehearsed it against a database shaped like the real one. The
+account work — Neon project, billing, `gcloud`, `firebase deploy` — is untouched,
+because both Google accounts involved belong to the developer.
+
+**Done:** the topology was decided, the four things in the code that would have
+broken on a managed host were found and fixed, and the whole database path was
+proven end to end against a Postgres 17 container configured to refuse what Neon
+refuses.
+
+**Tests green:** the full Go suite (**376**, 10 new in `internal/config`), 102
+Vitest tests, `gofmt`, `go vet`, `npm run lint`, `npm run build`. `golangci-lint`
+is **not installed on this machine any more** and was not run; CI runs it.
+
+### The topology, and the one thing that is unusual about it
+
+| Piece | Where |
+|---|---|
+| Frontend | Firebase Hosting, `erp-project-b66ce` |
+| Backend | Cloud Run `mini-erp-api`, `banded-torus-476311-q1`, `asia-southeast1` |
+| Database | Neon Postgres 17, AWS `ap-southeast-1`, database `erp` |
+| Auth | Firebase Authentication, `erp-project-b66ce` — with the demo accounts |
+| Secrets | Secret Manager, `banded-torus-476311-q1` |
+
+**The two projects sit under different Google accounts.** That was the
+developer's constraint, not a choice, and it costs exactly one thing: the
+Firebase service-account key has to live in the *Cloud Run* project's Secret
+Manager and mount as a file, because Cloud Run's own identity belongs to the
+wrong project to be granted anything in the other. No cross-project IAM is
+needed — the key authenticates directly. `DEPLOY.md` §5.
+
+Regions are co-located deliberately: Neon in AWS Singapore, Cloud Run in Google
+Singapore. Every request here makes several round trips, so cross-region latency
+multiplies rather than adds.
+
+### Four things would have broken on the first production migration
+
+None of these were visible locally, because locally the migrate role is the
+container's superuser and can do anything.
+
+1. **`ALTER ROLE erp_app NOBYPASSRLS NOSUPERUSER`** — PostgreSQL requires
+   superuser to touch either attribute *even to turn it off*. `make migrate`
+   re-applies `000_roles.sql` on every run, so the first production migration
+   would have aborted with `must be superuser to alter superuser roles`.
+2. **`ALTER ROLE erp_app SET timezone = 'UTC'`** — needs ADMIN on the role,
+   which the migrate role does not have on a role somebody else created.
+3. **`GRANT CONNECT ON DATABASE erp`** — hard-coded, and a managed host's
+   database is called whatever the provider called it. Now `current_database()`.
+4. **`ALTER DATABASE erp OWNER TO erp_migrate`** in the bootstrap — PostgreSQL
+   16+ grants a `CREATEROLE` role ADMIN on the roles it creates but **not SET**,
+   and that statement requires the ability to `SET ROLE` to the incoming owner.
+   One `GRANT … WITH SET TRUE` line fixes it; without it the error reads like a
+   permissions dead end.
+
+`000_roles.sql` now attempts each privileged statement and skips it when
+refused, then **asserts I3 from `pg_roles`**, which needs no privilege at all.
+That is the stronger arrangement: forcing an attribute and checking it are
+different claims, and only the check catches a role created through a console.
+
+### The rehearsal, and why it is worth more than reading the docs
+
+A Postgres 17 container was booted with an owner role holding `CREATEROLE` and
+`CREATEDB` but **not** `SUPERUSER` — Neon's exact shape — and then:
+
+| Step | Result |
+|---|---|
+| `deploy/neon-bootstrap.sql` as the provider's owner | Three roles, all `rolsuper=f rolbypassrls=f`, database `erp` owned by `erp_migrate` |
+| `cmd/migrate` | 001–006 applied, then `000_roles.sql` re-applied |
+| `cmd/migrate` again | `schema already up to date` — idempotent under the new file |
+| `cmd/seed` | Both tenants, 8 goods receipts through `api.PostGoodsReceipt`, journals balanced |
+| `cmd/dbverify` | **all 11 checks passed**, no warning |
+
+The first run of that rehearsal is what found problems 1–4, one at a time. It
+also produced two warnings that were real: after `ALTER DATABASE … OWNER TO`,
+the provider's role can no longer grant on that database, and PostgreSQL says so
+only in a `WARNING` — so the bootstrap's `GRANT CONNECT`/`GRANT USAGE` were
+silently doing nothing. They belong to `erp_migrate` and `000_roles.sql` now
+issues them; the bootstrap is a single connection as a result.
+
+### New in the repository
+
+| File | What it is |
+|---|---|
+| **`docs/DEPLOY.md`** | The runbook. Thirteen sections, every command filled in for these projects, plus the troubleshooting table. **This is what to read when deploying** — not the reference docs |
+| **`deploy/neon-bootstrap.sql`** | Run once against Neon as `neondb_owner`. Creates the three roles with SQL — never through the console, which grants `neon_superuser` and with it `BYPASSRLS` — pins their timezones, and creates database `erp` owned by `erp_migrate` |
+| **`deploy/cloudrun.env.yaml`** | The non-secret Cloud Run environment. A file rather than `--set-env-vars` because `CORS_ORIGINS` contains a comma, which that flag parses as a separator |
+| **`backend/cmd/dbverify`** | A10, J1, I4, RLS-forced-on-all-fourteen, and an end-to-end "no tenant context returns no rows" — against **any** database, from an env file. This is how Phase 9's last two boxes get ticked; both tests run against a testcontainer by construction and could not be pointed at a deployment |
+| **`frontend/firebase.json`** + `.firebaserc` | The SPA rewrite, and the cache headers `nginx.conf` states for the container image. Both have to agree and nothing checks that they do |
+| **`frontend/.env.production.example`** | `VITE_API_BASE_URL`, which forces the deploy order |
+| `backend/internal/config/config_test.go` | 10 tests. The package had none |
+
+### Two ergonomics that change how the commands are run
+
+- **`migrate`, `seed` and `dbverify` take an optional env file**:
+  `go run ./cmd/migrate .env.production`. Its values *override* the shell, so
+  there is no way to point one at the local database by accident. The API
+  deliberately does not take one — a server reads its environment, and Cloud Run
+  has no file to name.
+- **`make verify-db`, `make deploy-api`, `make deploy-web`** are in the Makefile,
+  and `make help` now lists the deployment section.
+
+### Verified, not assumed
+
+- **Vite's env precedence.** `.env.production` beats `.env.local`, so the dev URL
+  cannot leak into a release — checked by building with a probe value and
+  grepping `dist/`: the probe was in the bundle and `localhost:8080` was not.
+  Worth checking rather than trusting, because the failure mode is a deployed
+  frontend that calls localhost and looks like a CORS bug.
+- **The whole database path on a Neon-shaped host**, as above.
+
+### Not verified, and it is the gate
+
+Everything that needs an account. Nothing has been deployed, no Neon project
+exists, and `gcloud`/`firebase` were never invoked. The acceptance test against
+deployed URLs — Phase 9's first "done when" — has not started.
+
+The prepared-statement interaction between pgx and Neon's transaction-mode
+pooler is the one runtime unknown left; it is in `DEPLOY.md` §13 with its fix,
+because it will show up on the first request or never.
+
+**Deviations from spec:** four, all in *Decisions taken* above — the dev Firebase
+project for the deployment, I3's precise wording for `erp_migrate`,
+`000_roles.sql` asserting rather than forcing, and the API no longer requiring
+`MIGRATE_DATABASE_URL`.
+
+**TODO(post-mvp) markers added:** none. The standing list is still exactly two —
+`procurement_receipts.go` (audit `gr.posted`) and `lib/requisitionForm.ts` (the
+product picker).
+
+**Known broken / left half-done:**
+
+- **Phase 8's CI box is still open.** Get the workflow green before deploying,
+  not after: `go test -race` has still never run anywhere.
+- **`golangci-lint` is no longer installed on this machine.** Phase 8 ran it;
+  this session could not. `gofmt` and `go vet` are clean.
+- **The `react-router` RSC advisory** still shows in `npm audit` and still does
+  not apply to this SPA. Phase 8 deferred it to here; deferring it again is a
+  choice, not an oversight — the fix is a major version bump.
+- **The local database is still the walked-on demo.** Rebuild before demoing:
+  `docker compose down -v && make up && make migrate && make seed`.
+
+**Next:** `DEPLOY.md` §2 — create the Neon project. §2–§4 are independent of the
+GCP account work, and §4 ends with `dbverify` green against the real database,
+which is two of Phase 9's three boxes.

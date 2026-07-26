@@ -3,17 +3,29 @@
 # whole point of this file -- it stops both you and the agent running a command
 # in the wrong place for the rest of the build.
 
-.PHONY: dev dev-api dev-web up down test cover migrate seed fmt help
+.PHONY: dev dev-api dev-web up down test cover migrate seed fmt help \
+        verify-db deploy-api deploy-web
 
 help:
-	@echo "make dev      database + API + frontend together"
-	@echo "make up       database only"
-	@echo "make down     stop the database (data survives)"
-	@echo "make test     go test ./... plus the frontend lint, tests and build"
-	@echo "make cover    coverage for both applications, against the §12.6 targets"
-	@echo "make migrate  apply migrations, then re-apply role grants"
-	@echo "make seed     load demo data"
-	@echo "make fmt      gofmt the backend"
+	@echo "make dev        database + API + frontend together"
+	@echo "make up         database only"
+	@echo "make down       stop the database (data survives)"
+	@echo "make test       go test ./... plus the frontend lint, tests and build"
+	@echo "make cover      coverage for both applications, against the §12.6 targets"
+	@echo "make migrate    apply migrations, then re-apply role grants"
+	@echo "make seed       load demo data"
+	@echo "make verify-db  assert A10, J1 and I4 against the database in backend/.env"
+	@echo "make fmt        gofmt the backend"
+	@echo ""
+	@echo "deployment (Phase 9 — docs/DEPLOY.md):"
+	@echo "make deploy-api  build and deploy the backend to Cloud Run"
+	@echo "make deploy-web  build and deploy the frontend to Firebase Hosting"
+	@echo ""
+	@echo "  the three database commands take an env file, so the same target"
+	@echo "  points at the deployed database:"
+	@echo "    cd backend && go run ./cmd/migrate   .env.production"
+	@echo "    cd backend && go run ./cmd/seed      .env.production"
+	@echo "    cd backend && go run ./cmd/dbverify  .env.production"
 
 up:
 	docker compose up -d --wait
@@ -67,5 +79,35 @@ migrate:
 seed:
 	cd backend && go run ./cmd/seed
 
+# The invariants that live in the database rather than in Go: A10 (no
+# application role holds BYPASSRLS or SUPERUSER), J1 (every role's session
+# timezone is UTC) and I4 (both views are security_invoker). The Go suite
+# asserts these against a testcontainer, which says nothing about the database
+# a deployed service actually talks to -- and a role provisioned by hand
+# through a managed provider's console is exactly what they exist to catch.
+verify-db:
+	cd backend && go run ./cmd/dbverify
+
 fmt:
 	cd backend && gofmt -w .
+
+# --------------------------------------------------------------------------
+# Deployment (Phase 9). Both are one-liners with a great deal of first-time
+# setup behind them -- read docs/DEPLOY.md before the first run of either.
+#
+# The order is forced: the API goes first, because VITE_API_BASE_URL is baked
+# into the frontend bundle at build time and cannot be edited afterwards.
+# --------------------------------------------------------------------------
+
+# Builds from source with Cloud Build, using backend/Dockerfile. Everything
+# that varies -- the secrets, the CORS origins, the region -- was set once by
+# the `gcloud run deploy` in DEPLOY.md step 6 and is carried forward by the
+# service, so a redeploy is only ever a new image.
+deploy-api:
+	cd backend && gcloud run deploy mini-erp-api --source . --region asia-southeast1
+
+# Reads frontend/.env.production for VITE_API_BASE_URL. Vite loads it on top of
+# .env.local, so the dev URL cannot leak into a release.
+deploy-web:
+	cd frontend && npm run build
+	cd frontend && firebase deploy --only hosting

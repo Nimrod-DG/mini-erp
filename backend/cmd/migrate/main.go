@@ -13,12 +13,20 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
+	// An optional env file, so pointing this at a deployed database is
+	// `go run ./cmd/migrate .env.production` rather than three exported
+	// variables. See config.LoadFrom.
+	cfg, err := config.LoadCLI()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	sqlDB, err := db.OpenSQL(cfg.MigrateDatabaseURL)
+	migrateURL, err := cfg.RequireMigrateURL()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	sqlDB, err := db.OpenSQL(migrateURL)
 	if err != nil {
 		log.Fatalf("migrate: open: %v", err)
 	}
