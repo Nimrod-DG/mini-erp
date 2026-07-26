@@ -2225,3 +2225,104 @@ product picker).
 **Next:** `DEPLOY.md` §2 — create the Neon project. §2–§4 are independent of the
 GCP account work, and §4 ends with `dbverify` green against the real database,
 which is two of Phase 9's three boxes.
+
+---
+
+## Phase 9, Session B — 2026-07-27
+
+**Database and frontend are live. The backend is not, and the reason is a
+payment wall rather than anything in the code.**
+
+| Piece | State |
+|---|---|
+| Database — Neon Postgres 17, `ap-southeast-1`, database `erp` | **Live.** Bootstrapped, migrated, seeded, and `dbverify` green |
+| Frontend — Firebase Hosting, `erp-project-b66ce` | **Live** at https://erp-project-b66ce.web.app |
+| Backend — Cloud Run, then Render | **Blocked.** Neither host can be reached without a payment method |
+
+### What is actually running
+
+`deploy/neon-bootstrap.sql` ran against Neon exactly as rehearsed — three roles
+with `rolsuper=f rolbypassrls=f`, database `erp` owned by `erp_migrate`, all
+twelve statements in one pass. Then, against the real database:
+
+```
+go run ./cmd/migrate  .env.production   → 001..006 applied, 000_roles re-applied
+go run ./cmd/seed     .env.production   → both tenants, 8 receipts, journals balanced
+go run ./cmd/dbverify .env.production   → all 11 checks passed
+```
+
+**That is two of Phase 9's three "done when" boxes**: A10 and J1 against the
+production database, and no `warn` line — `erp_migrate not elevated` came back
+`super=false bypassrls=false`, which is the check that catches a role
+provisioned through a provider's console. I4 and RLS-forced-on-all-fourteen
+passed too, and the end-to-end one reads `0 without tenant context, 10 with it`.
+
+The frontend went up with a **placeholder** `VITE_API_BASE_URL`, so it serves,
+routes, and signs in against Firebase, and then fails at `/api/me`. The SPA
+rewrite was confirmed working on a pasted deep link.
+
+### Why the backend is not deployed
+
+Both hosts were tried, in this order.
+
+**Cloud Run.** The GCP project's billing account (`013F40-ACAA77-9793ED`, IDR)
+is **closed** — `gcloud billing accounts describe` returns `open: false`. It is
+almost certainly an expired Free Trial. This produced a genuinely misleading
+sequence worth writing down:
+
+- `gcloud services enable …` **succeeded**, because that only checks whether a
+  billing account is *linked*.
+- `gcloud secrets versions add` then failed with `BILLING_DISABLED`, because
+  real API calls check whether the account can *pay*.
+- The developer's other project has a Cloud Run service still answering, which
+  reads as "billing is fine". It is not: Cloud Run keeps serving an
+  already-deployed revision after billing lapses. Only *new* billable operations
+  are refused.
+
+**Render.** The free instance type advertises no card, and the whole service was
+configured correctly — `rootDir: backend`, Singapore, Free, health check
+`/api/health`, the Firebase key as a secret file, Pre-Deploy left empty because
+it is paid-gated and migrations deliberately do not run from the service. Render
+still raises an **Add Card** modal on deploy. The modal's copy is about paid
+instances, but it appears every time, so it is account verification rather than
+instance selection.
+
+**The blocker is a payment method, not the application.** The developer is in
+Indonesia with a BCA debit card; Google and Stripe both reject it. If the card
+is GPN-only it cannot work internationally at all; a Visa/Mastercard debit needs
+international online transactions enabled by the bank.
+
+### The one configuration error found, and not yet corrected
+
+The Render form carried **four** environment variables. **`CORS_ORIGINS` was
+missing**, so the API would have fallen back to `http://localhost:5173` and
+refused every request from the deployed frontend — which presents as a broken
+backend, not as a missing variable. Whoever picks this up: it is the fifth line
+of `deploy/render.env`.
+
+### What is committed
+
+`f8c1d44` — the Phase 9 work, pushed to `Nimrod-DG/mini-erp@master`, rebased
+over a README edit made on GitHub. Includes `render.yaml`, which configures the
+Render service declaratively and is still correct; only the account wall stands
+between it and a deploy.
+
+Gitignored and **on the developer's machine only**: `deploy/prod.filled.sql`
+(the bootstrap with real passwords), `deploy/prod.env`, `deploy/render.env`, and
+`backend/.env.production`. Losing those means resetting three Neon role
+passwords, not losing the deployment.
+
+### To finish this, in order
+
+1. A working payment method on **either** GCP or Render. Nothing else is needed
+   for Cloud Run — `deploy/deploy-api.sh` is written and its secret/IAM half was
+   tested up to the billing refusal.
+2. Add `CORS_ORIGINS` to the service's environment.
+3. Read the service URL, put it in `frontend/.env.production` as
+   `VITE_API_BASE_URL`, then `make deploy-web`. It is baked at build time, so
+   the frontend must be rebuilt after the backend exists — not before.
+4. Walk the acceptance test against the deployed URLs. That is the third and
+   last "done when", and the only one still untouched.
+
+**Next:** step 1 is not an engineering task. Everything downstream of it is
+about twenty minutes.
