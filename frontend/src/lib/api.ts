@@ -115,12 +115,15 @@ export type ListQuery = {
   sort?: string;
 };
 
-function queryString(query: ListQuery): string {
+function queryString(query: ListQuery, extra: Record<string, string | undefined> = {}): string {
   const params = new URLSearchParams();
   if (query.page && query.page > 1) params.set("page", String(query.page));
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
   if (query.q) params.set("q", query.q);
   if (query.sort) params.set("sort", query.sort);
+  for (const [key, value] of Object.entries(extra)) {
+    if (value) params.set(key, value);
+  }
   const rendered = params.toString();
   return rendered ? `?${rendered}` : "";
 }
@@ -278,4 +281,252 @@ export function setTenantUserModules(
     method: "PUT",
     body: JSON.stringify({ moduleRoles }),
   });
+}
+
+// --------------------------------------------------------------------------
+// Inventory (§9.5, §10.4).
+//
+// Quantities and money arrive as JSON numbers. On the server they are NUMERIC
+// end to end and never a float (I8) — every sum and every comparison, including
+// `belowReorderPoint`, is computed by PostgreSQL. What arrives here is the
+// answer, for display. Do not re-derive one of these numbers in TypeScript: a
+// second implementation of a rule is one that can disagree with the one that
+// counts.
+// --------------------------------------------------------------------------
+
+export type Product = {
+  id: string;
+  sku: string;
+  name: string;
+  uom: string;
+  reorderPoint: number;
+  standardCost: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Set means soft-deleted: hidden from lists, still resolvable by id, and
+   *  restorable (§6.9.1). Distinct from `isActive`, which means discontinued. */
+  deletedAt: string | null;
+  qtyOnHand: number;
+  belowReorderPoint: boolean;
+};
+
+export type ProductBalance = {
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  qtyOnHand: number;
+};
+
+export type ProductDetail = Product & { balances: ProductBalance[] };
+
+export type Warehouse = {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  qtyOnHand: number;
+  /** Products with a non-zero balance here — what blocks a delete (G5). */
+  productCount: number;
+};
+
+export type StockCell = {
+  productId: string;
+  sku: string;
+  productName: string;
+  uom: string;
+  /** The product is in the recycle bin, but the goods are still on the shelf, so
+   *  the balance is shown and marked. The grid, the ledger, and the warehouse's
+   *  own count all have to agree about this or one of them lies. */
+  productDeleted: boolean;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  qtyOnHand: number;
+};
+
+export type LowStockRow = {
+  productId: string;
+  sku: string;
+  name: string;
+  uom: string;
+  qtyOnHand: number;
+  reorderPoint: number;
+  shortfall: number;
+};
+
+export type EntryType = "receipt" | "issue" | "adjustment";
+export type SourceType = "goods_receipt" | "manual_adjustment";
+
+export type LedgerEntry = {
+  id: string;
+  occurredAt: string;
+  entryType: EntryType;
+  qtyDelta: number;
+  unitCost: number;
+  sourceType: SourceType;
+  sourceId: string | null;
+  note: string | null;
+  productId: string;
+  sku: string;
+  productName: string;
+  /** The product has since been deleted. The row stays — a movement that
+   *  happened is still a movement that happened (§6.9.3). */
+  productDeleted: boolean;
+  warehouseId: string;
+  warehouseCode: string;
+  createdById: string;
+  createdByName: string;
+};
+
+export type ProductWrite = {
+  sku?: string;
+  name?: string;
+  uom?: string;
+  /** Sent as strings so a decimal never crosses the wire as a float the browser
+   *  rounded on the way out. The endpoint accepts both forms. */
+  reorderPoint?: string;
+  standardCost?: string;
+  isActive?: boolean;
+};
+
+export type WarehouseWrite = {
+  code?: string;
+  name?: string;
+  isActive?: boolean;
+};
+
+/** `includeDeleted` is module `admin` only (§9.0) — the server refuses it for
+ *  anyone else, so the toggle that sets it is hidden rather than disabled. */
+export type MasterDataQuery = ListQuery & { includeDeleted?: boolean };
+
+export function listProducts(query: MasterDataQuery = {}) {
+  return apiFetch<ListResponse<Product>>(
+    `/api/inventory/products${queryString(query, {
+      includeDeleted: query.includeDeleted ? "true" : undefined,
+    })}`,
+  );
+}
+
+export function getProduct(id: string) {
+  return apiFetch<ProductDetail>(`/api/inventory/products/${id}`);
+}
+
+export function createProduct(body: ProductWrite) {
+  return apiFetch<ProductDetail>("/api/inventory/products", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchProduct(id: string, body: ProductWrite) {
+  return apiFetch<ProductDetail>(`/api/inventory/products/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Soft delete. The row keeps its identity so history still resolves (§6.9.1);
+ *  nothing is removed from the database. */
+export function deleteProduct(id: string) {
+  return apiFetch<ProductDetail>(`/api/inventory/products/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function restoreProduct(id: string) {
+  return apiFetch<ProductDetail>(`/api/inventory/products/${id}/restore`, {
+    method: "POST",
+  });
+}
+
+export function listWarehouses(query: MasterDataQuery = {}) {
+  return apiFetch<ListResponse<Warehouse>>(
+    `/api/inventory/warehouses${queryString(query, {
+      includeDeleted: query.includeDeleted ? "true" : undefined,
+    })}`,
+  );
+}
+
+export function createWarehouse(body: WarehouseWrite) {
+  return apiFetch<Warehouse>("/api/inventory/warehouses", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchWarehouse(id: string, body: WarehouseWrite) {
+  return apiFetch<Warehouse>(`/api/inventory/warehouses/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteWarehouse(id: string) {
+  return apiFetch<Warehouse>(`/api/inventory/warehouses/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function restoreWarehouse(id: string) {
+  return apiFetch<Warehouse>(`/api/inventory/warehouses/${id}/restore`, {
+    method: "POST",
+  });
+}
+
+export type StockQuery = ListQuery & {
+  productId?: string;
+  warehouseId?: string;
+};
+
+export function listStock(query: StockQuery = {}) {
+  return apiFetch<ListResponse<StockCell>>(
+    `/api/inventory/stock${queryString(query, {
+      productId: query.productId,
+      warehouseId: query.warehouseId,
+    })}`,
+  );
+}
+
+export function listLowStock(query: ListQuery = {}) {
+  return apiFetch<ListResponse<LowStockRow>>(
+    `/api/inventory/stock/low${queryString(query)}`,
+  );
+}
+
+export type LedgerQuery = ListQuery & {
+  productId?: string;
+  warehouseId?: string;
+  entryType?: EntryType | "";
+  sourceType?: SourceType | "";
+};
+
+export function listLedger(query: LedgerQuery = {}) {
+  return apiFetch<ListResponse<LedgerEntry>>(
+    `/api/inventory/ledger${queryString(query, {
+      productId: query.productId,
+      warehouseId: query.warehouseId,
+      entryType: query.entryType || undefined,
+      sourceType: query.sourceType || undefined,
+    })}`,
+  );
+}
+
+export type AdjustmentRequest = {
+  productId: string;
+  warehouseId: string;
+  /** Signed decimal text: `+` in, `-` out. A string, so the browser cannot
+   *  round it before the server sees it. */
+  qtyDelta: string;
+  note?: string;
+};
+
+export function postAdjustment(body: AdjustmentRequest) {
+  return apiFetch<{ entry: LedgerEntry; qtyOnHand: number }>(
+    "/api/inventory/adjustments",
+    { method: "POST", body: JSON.stringify(body) },
+  );
 }

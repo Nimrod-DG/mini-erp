@@ -8,9 +8,32 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/DGosal/mini-erp/backend/internal/httpx"
+	"github.com/DGosal/mini-erp/backend/internal/identity"
+	"github.com/DGosal/mini-erp/backend/internal/middleware"
 )
+
+// tenantScope returns the caller and the tenant-scoped transaction their
+// request runs in — the only handle a tenant-scoped query may use (I1).
+//
+// Both are guaranteed present for any route below the /api chain that a
+// superadmin cannot reach: TenantTx opens a transaction for every identity that
+// has a tenant, and RequireTenantAdmin and RequireModule both refuse the
+// tenantless ones first. So a miss here is a wiring bug — a route gated by
+// neither — and it is a loud 500 rather than a query that quietly runs on the
+// wrong handle or, worse, on a transaction with no tenant context where RLS
+// silently returns nothing.
+func tenantScope(c *fiber.Ctx) (*identity.Identity, *gorm.DB, error) {
+	id := middleware.IdentityFrom(c)
+	tx := middleware.TxFrom(c)
+	if id == nil || tx == nil || id.TenantID == uuid.Nil {
+		return nil, nil, fiber.NewError(fiber.StatusInternalServerError,
+			"a tenant-scoped handler was reached without a tenant-scoped transaction")
+	}
+	return id, tx, nil
+}
 
 // slugPattern is what a URL-safe tenant slug looks like. Anchored, so a slug
 // cannot smuggle a slash or a space into a path.
@@ -80,6 +103,45 @@ func validatePassword(password string) error {
 }
 
 func trimmed(s string) string { return strings.TrimSpace(s) }
+
+// derefString reads an optional string field, treating absent as empty. It is
+// what lets one request struct serve both create (absent means default) and
+// patch (absent means leave alone) without two shapes of the same object.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// nonNegative validates an optional NUMERIC field, defaulting to zero.
+//
+// Pure, and returns a real error rather than writing a response — see the note
+// on parseMatrix for why a validating helper must never signal failure by
+// returning what httpx.Fail returned.
+func nonNegative(value *httpx.Numeric, field string) (httpx.Numeric, error) {
+	if value == nil {
+		return httpx.Zero, nil
+	}
+	parsed, err := httpx.ParseNumeric(value.String())
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", field, err)
+	}
+	if parsed.IsNegative() {
+		return "", fmt.Errorf("%s cannot be negative", field)
+	}
+	return parsed, nil
+}
+
+// plural renders "1 product" / "3 products", for refusals that have to name how
+// much is in the way. Only regular nouns, deliberately: the day this needs an
+// irregular is the day it should be a lookup table rather than a rule.
+func plural(n int64, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
 
 func contains(haystack []string, needle string) bool {
 	for _, s := range haystack {

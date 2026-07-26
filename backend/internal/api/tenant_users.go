@@ -29,7 +29,6 @@ import (
 	"github.com/DGosal/mini-erp/backend/internal/db"
 	"github.com/DGosal/mini-erp/backend/internal/httpx"
 	"github.com/DGosal/mini-erp/backend/internal/identity"
-	"github.com/DGosal/mini-erp/backend/internal/middleware"
 )
 
 var userSortable = map[string]string{
@@ -70,22 +69,6 @@ type userModuleRow struct {
 type userDetail struct {
 	userRow
 	Modules []userModuleRow `json:"modules"`
-}
-
-// tenantScope returns the caller and the transaction their request runs in.
-//
-// Both are guaranteed present by the chain — RequireTenantAdmin has already
-// refused superadmins, and TenantTx opens a transaction for everyone else — so
-// a miss here is a wiring bug and is a 500, loudly, rather than a query that
-// quietly runs on the wrong handle.
-func tenantScope(c *fiber.Ctx) (*identity.Identity, *gorm.DB, error) {
-	id := middleware.IdentityFrom(c)
-	tx := middleware.TxFrom(c)
-	if id == nil || tx == nil || id.TenantID == uuid.Nil {
-		return nil, nil, fiber.NewError(fiber.StatusInternalServerError,
-			"tenant user management reached without a tenant-scoped transaction")
-	}
-	return id, tx, nil
 }
 
 // effectiveRoles is what the target user actually holds in each entitled module.

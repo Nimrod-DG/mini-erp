@@ -13,7 +13,14 @@ const MODULES: { code: ModuleCode; label: string }[] = [
   { code: "finance", label: "Finance" },
 ];
 
-type NavItem = { to: string; label: string };
+type NavItem = {
+  to: string;
+  label: string;
+  /** Shown only while the module is the one being looked at. A module's screens
+   *  are not top-level destinations — they are places inside it — and listing
+   *  all of them all of the time would make the sidebar a table of contents. */
+  children?: { to: string; label: string }[];
+};
 
 /**
  * The sidebar, driven entirely by `/api/me` (§10.1).
@@ -36,14 +43,26 @@ function navItems(me: Me): NavItem[] {
 
   const items: NavItem[] = [{ to: "/", label: "Dashboard" }];
 
-  // The module screens arrive in Phases 4-6. The entitlement filter is already
-  // the real one, so each phase adds a path here and nothing else: an item with
-  // nowhere to go is left out rather than linking at a route that redirects.
-  const modulePaths: Partial<Record<ModuleCode, string>> = {};
+  // Procurement and Finance arrive in Phases 5-6. The entitlement filter is
+  // already the real one, so each phase adds a path here and nothing else: an
+  // item with nowhere to go is left out rather than linking at a route that
+  // redirects.
+  const modulePaths: Partial<Record<ModuleCode, NavItem>> = {
+    inventory: {
+      to: "/inventory/products",
+      label: "Inventory",
+      children: [
+        { to: "/inventory/products", label: "Products" },
+        { to: "/inventory/stock", label: "Stock on hand" },
+        { to: "/inventory/ledger", label: "Ledger" },
+        { to: "/inventory/warehouses", label: "Warehouses" },
+      ],
+    },
+  };
   for (const module of MODULES) {
-    const path = modulePaths[module.code];
-    if (path && me.moduleRoles[module.code]) {
-      items.push({ to: path, label: module.label });
+    const item = modulePaths[module.code];
+    if (item && me.moduleRoles[module.code]) {
+      items.push(item);
     }
   }
 
@@ -75,6 +94,12 @@ function RoleBadges({ me }: { me: Me }) {
       ))}
     </ul>
   );
+}
+
+/** `/inventory/products` -> `/inventory`, so every screen in the module keeps
+ *  the module's sub-navigation open. */
+function modulePrefix(path: string): string {
+  return "/" + path.split("/")[1];
 }
 
 function navLinkClass({ isActive }: { isActive: boolean }): string {
@@ -113,17 +138,42 @@ export function AppShell({
 
   const nav = (
     <nav aria-label="Main" className="flex flex-col gap-1 p-3">
-      {items.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.to === "/"}
-          className={navLinkClass}
-          onClick={() => setDrawerOpen(false)}
-        >
-          {item.label}
-        </NavLink>
-      ))}
+      {items.map((item) => {
+        // A module's own screens appear only once you are inside it. Matched on
+        // the module's prefix rather than on the exact path, or the sub-items
+        // would vanish the moment you opened one of them.
+        const inside =
+          item.children !== undefined &&
+          location.pathname.startsWith(modulePrefix(item.to));
+
+        return (
+          <div key={item.to}>
+            <NavLink
+              to={item.to}
+              end={item.to === "/"}
+              className={navLinkClass}
+              onClick={() => setDrawerOpen(false)}
+            >
+              {item.label}
+            </NavLink>
+
+            {inside && (
+              <div className="mt-1 flex flex-col gap-1 border-l border-hairline pl-3">
+                {item.children?.map((child) => (
+                  <NavLink
+                    key={child.to}
+                    to={child.to}
+                    className={navLinkClass}
+                    onClick={() => setDrawerOpen(false)}
+                  >
+                    {child.label}
+                  </NavLink>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </nav>
   );
 

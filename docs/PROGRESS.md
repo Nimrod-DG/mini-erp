@@ -26,8 +26,8 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
-**Phase:** 3 — done
-**Next action:** open [`phases/phase-4-inventory.md`](phases/phase-4-inventory.md) in a **new session**
+**Phase:** 4 — done
+**Next action:** open [`phases/phase-5-procurement.md`](phases/phase-5-procurement.md) in a **new session**
 
 Migration files that now exist (`backend/migrations/`), applied in this order by
 `cmd/migrate`:
@@ -41,26 +41,30 @@ Migration files that now exist (`backend/migrations/`), applied in this order by
 | `004_views_triggers.up.sql` | both views, `grl_no_over_receipt`, `jel_balanced`, the two terminal-state triggers |
 | `005_rls_grants.up.sql` | RLS enable/force/policy, grants, ledger and superadmin revokes, `seed_tenant_accounts()` |
 
-Backend packages as of Phase 3:
+Backend packages as of Phase 4:
 
 | Package | Contents |
 |---|---|
 | `internal/auth` | `Verifier` (UID only, never claims) and `UserManager` (create/delete/disable), both satisfied by one `Firebase` value |
 | `internal/identity` | `Identity`, `Resolve` — the one database lookup behind I9 — plus `RoleLevel` and **`LevelFor`**, the single function every permission check goes through |
 | `internal/middleware` | `RequestID` `FirebaseAuth` `ResolveIdentity` `TenantTx` `RequireModule` `RequireSuperadmin` `RequireTenantAdmin`, and the accessors `IdentityFrom` / `TxFrom` |
-| `internal/httpx` | the §9.8 error envelope (`Fail`, `FailWith`, `Unauthenticated`) and the §9.0 list contract (`ParseList`, `ListResponse`) |
+| `internal/httpx` | the §9.8 error envelope (`Fail`, `FailWith`, `Unauthenticated`), the §9.0 list contract (`ParseList`, `ListResponse`), and **`Numeric`** — the exact-decimal type every NUMERIC crosses the wire as |
 | `internal/db` | pools, `WithTenant`, migrations, and `SQLState` / `IsUniqueViolation` for mapping constraints to business outcomes |
-| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers and the six `/tenant/users` handlers |
-| `testsupport` | `FakeVerifier`, `FakeUsers`, the shared HTTP `Harness` (used by both test packages), and the tenant/user fixtures |
+| `internal/api` | `New` (route wiring, so tests drive the real chain), `Me`, the seven `/admin/*` handlers, the six `/tenant/users` handlers, and the sixteen `/inventory/*` handlers |
+| `testsupport` | `FakeVerifier`, `FakeUsers`, the shared HTTP `Harness` (used by both test packages), and the tenant/user/inventory fixtures |
 
-Frontend routes as of Phase 3: `/login` `/auth/action` `/` `/admin/tenants`
+Frontend routes as of Phase 4: `/login` `/auth/action` `/` `/admin/tenants`
 `/admin/tenants/new` `/admin/tenants/:id` `/settings/users` `/settings/users/new`
-`/settings/users/:id`. All signed-in screens render inside `AppShell`.
+`/settings/users/:id` `/inventory/products` `/inventory/products/new`
+`/inventory/products/:id` `/inventory/warehouses` `/inventory/stock`
+`/inventory/ledger`. All signed-in screens render inside `AppShell`.
 
 ### What a module phase inherits
 
-Phases 4–6 each build a module. These already exist — use them rather than
-rebuilding them, and note the two traps at the bottom.
+Phases 5–6 each build a module. These already exist — use them rather than
+rebuilding them, and note the traps at the bottom. **Phase 4's
+`internal/api/inventory_*.go` is the worked example of every row in this table**;
+read it before building procurement rather than deriving the shape again.
 
 | Need | Use |
 |---|---|
@@ -71,8 +75,12 @@ rebuilding them, and note the two traps at the bottom.
 | Map a constraint to a business outcome | `db.IsUniqueViolation(err)`, `db.ConstraintName(err)`, `db.SQLState(err)` |
 | Reject a request | `httpx.Fail(c, status, code, msg)` or `FailWith(..., details)`. 400 `malformed`, 404 `not_found`, 409 `in_use` / `last_admin`, 422 business rule |
 | HTTP tests | `testsupport.NewHarness(t)` → `h.Get/Post/Patch/Put`, `testsupport.Decode[T]`, `AssertStatus`, `AssertErrorCode`. Put them in `internal/api` (package `api_test`) |
-| Fixtures | `h.DB.NewTenant(t, name)` gives a tenant with all three modules, master data, and a staff user with `admin` everywhere. Also `NewUser(roles)` `NewAdmin()` `NewUserAs(role, roles)` `NewSuperadmin()` `Deactivate` `Suspend` `SetModule` |
+| Fixtures | `h.DB.NewTenant(t, name)` gives a tenant with all three modules, master data, and a staff user with `admin` everywhere. Also `NewUser(roles)` `NewAdmin()` `NewUserAs(role, roles)` `NewSuperadmin()` `Deactivate` `Suspend` `SetModule`, and from Phase 4 `NewProduct(name, reorderPoint)` `NewWarehouse(name)` `PostLedger(product, warehouse, qty, entryType)` `SetPOStatus` `NewGoodsReceiptLine`. Quantities are decimal **strings** — no float in the fixtures either (I8) |
 | Frontend list screen | `useAsync(key, fetcher)` plus `SkeletonRows` `EmptyState` `ErrorNotice` `Pagination` from `components/ListStates.tsx`. Screens render inside `<AppShell title=… actions=…>` |
+| A money or quantity column | `httpx.Numeric` on the Go struct, and `::text` on the column in the SELECT. Never `float64` (I8) |
+| Comparing or summing two NUMERICs | Write it in SQL. `Numeric` has no arithmetic on purpose — `belowReorderPoint` and `shortfall` are computed by PostgreSQL and sent as answers |
+| Hide a control by level, in the browser | `holds(me.moduleRoles, "inventory", "admin")` from `lib/levels.ts`, and `<RequireModule module=…>` for a whole route. Cosmetic (I12) |
+| Render a timestamp | `formatDateTime(iso, me.tenant.timezone)` from `lib/format.ts` — the tenant's zone, never the browser's (I7) |
 
 **Trap 1 — a helper must never signal failure by returning what `httpx.Fail`
 returned.** `Fail` returns `nil` deliberately: the body is already written, and
@@ -88,16 +96,25 @@ other four platform tables. Any query against them needs an explicit
 does not apply to the inventory, procurement, or finance tables, which are all
 RLS-forced.
 
-**Two things Phase 4 should replace, not add to:**
+**Trap 3 — resolving a row by ID must not filter `deleted_at`.** The lists
+filter and the writes refuse, but `getProduct` and every join that renders a
+historical reference read deleted rows deliberately (§6.9.1). These are raw SQL,
+not GORM models, so there is no implicit `WHERE deleted_at IS NULL` to opt out
+of with `.Unscoped()` — every filter is written by hand, which means every
+*omission* has to be deliberate too. Adding `AND p.deleted_at IS NULL` to the
+ledger's product join by reflex deletes last quarter's history from the screen;
+a mutation confirmed G1 catches exactly that.
 
-- `testsupport/harness.go` registers twelve `/api/probe/<module>/<level>` routes
-  that exist only because no real gated route did. They stand in for the module
-  endpoints. Keep them — Group B asserts against them — but Phase 4's own tests
-  should gate on the **real** inventory routes, or they prove nothing about what
-  ships.
-- `AppShell.tsx` has an empty `modulePaths` map. Adding `inventory: "/inventory/products"`
-  there is the whole of the nav change; the entitlement filter around it is
-  already the real one, reading `/api/me`.
+**Both things Phase 4 was told to replace are done:**
+
+- `testsupport/harness.go` still registers the twelve
+  `/api/probe/<module>/<level>` routes — Group B asserts against them — but
+  Phase 4's own gate test (`TestInventoryRoutesCarryTheLevelsFromTheSpec`) runs
+  against the **real** routes and asserts the levels in the §9.5 table. A probe
+  route cannot catch a real route registered at the wrong level.
+- `AppShell.tsx`'s `modulePaths` now holds `inventory`, and gained a second
+  level: a module's own screens appear as sub-items only while you are inside
+  it. Phase 5 adds `procurement` the same way.
 
 ---
 
@@ -139,6 +156,20 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 | 2026-07-26 | The user responses carry **`effectiveRoles`** (what `LevelFor` resolves) beside `moduleRoles` (what is stored) | The two differ for every tenant admin — stored empty, effective `admin` everywhere entitled — so a screen rendering the stored map shows "no access" next to the person who has all of it. Computing it server-side, through the same `LevelFor`, is what stops §5.4 being reimplemented in TypeScript where it would drift. |
 | 2026-07-26 | Group B lives in a new `internal/api` test package, the HTTP harness moved into `testsupport`, and `make test` now passes `-p 1` | Three test packages now start a PostgreSQL container each; Phase 2 already saw one fail to come up with two in parallel. `-p 1` serialises packages and costs nothing measurable. The harness moved rather than being copied because two copies of a permission-test harness will drift, and the shipped chain is the thing under test. |
 | 2026-07-26 | Added `/settings/users/new`, which §10.6 does not list | `POST /api/tenant/users` exists in §9.3 and the user list needs an "Add user" target. §10.6 lists `/admin/tenants/new` and omits its tenant-plane counterpart; this reads as an oversight rather than a decision. |
+| 2026-07-26 | Money and quantities cross the wire as **`httpx.Numeric`**, an exact-decimal string type, and every column is selected `::text` | I8 forbids float for these values, and the prohibition does not stop at the column: a `NUMERIC(18,4)` scanned into a `float64` has lost whatever it is going to lose before any arithmetic happens. `Numeric` holds the digits PostgreSQL produced, hands the same digits back on the way in, and marshals them as a JSON *number* so the frontend needs no decimal library. It has **no arithmetic methods**, deliberately — `belowReorderPoint`, `shortfall`, and every sum are computed in SQL, where both operands are still NUMERIC. A `Compare` method here would be the first step towards deciding a business rule in float64. `numeric_test.go` round-trips 2^53+1 with a fraction, which a single implicit conversion would visibly change. |
+| 2026-07-26 | `?includeDeleted=true` is refused *inside* the handler with `insufficient_module_role`, not by a separate route | §9.0 makes the recycle bin module-`admin` only, but the lists it applies to are `viewer` routes — the level varies by parameter, not by path, so `RequireModule` cannot express it. The refusal carries `required`/`actual` exactly as the middleware's does, so a client cannot tell the two apart and does not have to. |
+| 2026-07-26 | `GET /inventory/products/:id` resolves a **soft-deleted** product for any `viewer`, rather than being admin-only like the deleted *list* | This is §6.9.1's "still resolvable by foreign key" case, not the recycle-bin case. Every ledger row links here, and a 404 would make last quarter's movements unreadable — the exact failure soft delete exists to prevent. `deletedAt` rides in the payload so the screen says so and offers Restore instead of the editing controls. The lists still hide it, which is where the policy actually bites. |
+| 2026-07-26 | Restoring a row that is **not** deleted is a 200 no-op, not an error | The alternative needs an error code for "it was already fine", and §9.8's list has none that fits — `in_use` means something else and inventing one would put a code in the contract that no client can act on. Two admins clicking Restore on the same row should not produce a failure for the slower one. |
+| 2026-07-26 | A warehouse's emptiness is asked **per product** (`EXISTS … WHERE qty_on_hand <> 0`), never as one total | A warehouse holding +5 of one product and −5 of another sums to zero and is emphatically not empty. The one-total version passes a single-product test and strands both balances somewhere nobody can see; G5 uses two products precisely so the mutation fails, and it does. |
+| 2026-07-26 | A manual adjustment is refused against a **deleted** product but allowed against a **discontinued** one (`is_active = false`) | The two columns are two questions (§6.9.1). Writing off the last of a discontinued product is the ordinary reason to reach for this endpoint, and refusing it would leave that stock on the books permanently. A deleted product is refused because this is a picker, not a historical reference. |
+| 2026-07-26 | Low stock requires `reorder_point > 0`, and the comparison is strict `<` | Every product defaults to a reorder point of zero, so without the guard every product with no stock is "low" and the §10.2 widget is noise on day one. Strict `<` means a product sitting exactly *at* its point is not yet below it. F2 names both cases, plus the one that matters most — a product with no ledger rows at all, whose `COALESCE`d balance of zero is genuinely low. |
+| 2026-07-26 | The adjustment's `unit_cost` defaults to the product's `standard_cost`, not to zero | The column defaults to 0 and nothing would have complained. But an adjustment valued at nothing understates inventory value the moment Finance reads it, and the person counting a shelf has no cost to hand. An explicit `unitCost` still overrides. |
+| 2026-07-26 | `tenantScope` moved from `tenant_users.go` to `validate.go` and its message generalised | Second concrete use case, which is the bar §4 sets for abstracting. Sixteen inventory handlers need the same identity-plus-transaction pair, and a copy would drift from the one that carries the "nil means a route gated by neither, so fail loudly" reasoning. |
+| 2026-07-26 | The G4-shaped in-use test was written **now** rather than deferred to Phase 5, against products | The phase brief says the product/open-PO-line check "has no data to act on until Phase 5 — write it now, test it in Phase 5". That is over-cautious: `purchase_orders` and `purchase_order_lines` exist since Phase 1 and the fixtures already build them, so the check is fully testable today. G4 *proper* — suppliers — still waits for its endpoint in Phase 5. |
+| 2026-07-26 | Added `/inventory/warehouses`, which §10.4 does not list | §9.6.1 is explicit that every entity with CRUD endpoints needs a working UI, and that "a half-built entity — creatable but not editable — is the most common way a demo falls over". Warehouses have the full endpoint set from §9.5, the stock grid and the adjustment form both pick from them, and without this screen the only way to create one is curl. Kept to a flat list with inline editing: a warehouse is a code and a name, and a detail route would be two fields on an empty page. |
+| 2026-07-26 | **A deleted product's balance is shown in the stock grid**, marked, rather than hidden. Reversed during the browser walkthrough | The first version hid it, reading §6.9.1's "hidden everywhere by default" literally. That was wrong, and the walkthrough found it in about a minute: the warehouse list said "1 product, 30 on hand" and refused deletion (G5) over stock the grid showed nowhere. A balance is not the product *record* — it is a quantity of goods in a place, and the goods do not leave the shelf when somebody tidies the catalogue. Three things now agree by construction: the ledger shows a deleted product's movements, the grid shows their sum, and the warehouse row counts it and refuses over it. `TestDeletedProductsStockStaysVisibleEverywhere` asserts all three in one test so they cannot drift apart again. Deleted *warehouses* are still hidden, because a warehouse can only be deleted once it is empty — with an `OR qty_on_hand <> 0` escape hatch so stranded stock could never be invisible. |
+| 2026-07-26 | Action outcomes are **toasts**; load failures stay inline as `ErrorNotice` | User preference, and the split is principled rather than cosmetic. A failed *load* belongs where the data would have been — a toast there leaves an empty screen with no explanation once it fades. A refused or successful *action* belongs in a toast: the user pressed a button and is looking for the answer, and putting a row-level refusal inline shifts the table and lands the message where their eye is not. Refusals last 12s and are dismissible; confirmations 4s. The bigger win was incidental: Save changes previously gave **no feedback at all** — it refetched and looked identical to having done nothing. |
+| 2026-07-26 | A deleted product's Status reads "Deleted", not "Active" | `is_active` really is still true, and the two columns really are different questions — but "Status: Active" next to a banner saying the product is deleted reads as a contradiction, and a reader cannot be expected to know there are two columns behind one word. Found in the walkthrough. |
 | 2026-07-26 | Cross-tenant and malformed-ID misses are `404`, never `403` | An admin probing another workspace's user ID must not be able to tell an ID that exists elsewhere from one that never existed — that difference is a cross-tenant existence oracle. `/tenant/users/banana` is a 404 for the same reason. |
 
 ---
@@ -581,3 +612,152 @@ two worth knowing about before Phase 4:
 
 **Next:** open [`phases/phase-4-inventory.md`](phases/phase-4-inventory.md) in
 a new session.
+
+## Phase 4 — 2026-07-26
+
+**Done:** the inventory module works end to end, and stock on hand is derived
+everywhere it appears. Sixteen `/api/inventory/*` routes cover products and
+warehouses (full CRUD, soft delete, restore), the stock grid, the low-stock
+query, the filterable ledger, and the one endpoint that appends to it. Every
+route carries its own `RequireModule` at the level §9.5 specifies — reads at
+`viewer`, adjustments at `approver`, master data at `admin`.
+
+`stock_balances` is read on every request and there is no counter column
+anywhere (I6). The ledger is append-only in the strongest sense available: the
+service layer never tries, and `erp_app` has `UPDATE`/`DELETE` revoked, so a
+future code path that does try gets a `42501` rather than quietly rewriting
+history.
+
+Screens: `/inventory/products` (stock and reorder flag), `/inventory/products/new`,
+`/inventory/products/:id` (edit, discontinue, delete/restore, per-warehouse
+balances, an adjustment form, and that product's ledger history),
+`/inventory/warehouses`, `/inventory/stock` (with a low-stock banner), and
+`/inventory/ledger`. `AppShell` gained the Inventory nav item and a second level:
+a module's screens appear as sub-items only while you are inside it.
+
+**Tests green:** F1–F3 and G1–G3, G5, G6, G9–G11, plus Groups A, B and I–J
+unchanged. **100 top-level tests** (167 including subtests), up from 79 at
+Phase 3. `go test ./... -p 1` clean, `go vet` clean, `gofmt` clean, `tsc
+--noEmit`, `npm run build`, and `oxlint` all clean — oxlint reports only the
+three pre-existing fast-refresh warnings, and none in new code.
+
+G4 and G7–G8 are procurement and stay in Phase 5, but the **product** analogue of
+G4 is tested now: deleting a product with an open PO line is `409 in_use` naming
+the line, and the same delete succeeds once the PO is `received`. The brief
+expected that to wait for Phase 5; the fixtures already build purchase orders, so
+it did not have to.
+
+Beyond the listed IDs:
+
+- **`TestInventoryRoutesCarryTheLevelsFromTheSpec`** walks every §9.5 route and
+  asserts the level it is registered at. Group B already proves `RequireModule`
+  works, against probe routes — this proves the *route table* matches the spec,
+  which a probe route structurally cannot.
+- **Isolation from two tenants**, through the list, by ID, on a write, and
+  through the ledger — with tenant B's own data re-read afterwards, so the
+  emptiness is a filtering result rather than a broken fixture.
+- **`httpx.Numeric`'s six unit tests**, no container: the round trip preserves
+  2^53+1 with a fraction, `1e400` is refused in both quoted and unquoted form,
+  and `Scan(float64)` is an error rather than a silent acceptance.
+- The §9.0 list contract on the inventory lists, including that page 2 of a
+  descending sort holds the whole set's third and fourth items rather than a
+  sorted slice of one page.
+
+**Two mutations were run to check the tests bite rather than merely pass. Both
+were caught:**
+
+| Mutation | Result |
+|---|---|
+| warehouse emptiness asked as one `SUM` instead of per product | **caught** — G5 got a 200 where it wanted 409, deleting a warehouse holding +5 and −5 |
+| `AND p.deleted_at IS NULL` added to the ledger's product join | **caught** — G1 reported "ledger rows = 0, want 1 — deleting a product deleted its history" |
+
+The second is the mutation that matters, because it is the one a later phase
+would make by reflex. It is now Trap 3 in *What a module phase inherits*.
+
+**Live check against the local stack:** the Phase 3 binary on `:8080` was
+replaced with a freshly built one. `/api/health` is 200 without a token, and all
+sixteen inventory routes return `401 unauthenticated` from the auth chain rather
+than 404 — they are wired. `GET`, `POST`, and `DELETE` were each checked, since a
+missing verb registration looks identical to a working one until someone uses it.
+
+**Deviations from spec:** twelve, all recorded in *Decisions taken* above. The
+three worth knowing before Phase 5:
+
+- **`httpx.Numeric` is how every NUMERIC crosses the wire**, and it has no
+  arithmetic on purpose. Procurement's line totals and PO amounts go the same
+  way, and `total_amount` must be summed in SQL rather than in Go.
+- **Resolving a row by ID does not filter `deleted_at`** (Trap 3). Procurement's
+  PO-line joins inherit this directly — G6 already asserts it at the query level
+  precisely so Phase 5 does not undo it.
+- **`/inventory/warehouses` exists** though §10.4 does not list it, because
+  §9.6.1 requires a UI for every CRUD entity. Suppliers need the same treatment
+  in Phase 5; §10.3 does list `/procurement/suppliers`, so no judgement call
+  there.
+
+**TODO(post-mvp) markers added:** none.
+
+**Feedback applied after the walkthrough** — the flow worked first time, but
+three things were wrong on screen, and all three are fixed and recorded in
+*Decisions taken*: no success feedback on any action (now toasts), a deleted
+product reading "Status: Active", and a deleted product's stock being counted by
+the warehouse while the grid hid it. The last one is a genuine correctness fix
+with a test, not a cosmetic one — see
+`TestDeletedProductsStockStaysVisibleEverywhere`.
+
+**Known broken / left half-done:**
+
+- ~~No live browser walkthrough~~ — **done.** Signed in as `dgjy2019@gmail.com`
+  and walked the whole flow: warehouse, product, `+50` then `-20` adjustments
+  with the balance moving to 30 in the panel and both entries appearing in the
+  history, delete with the ledger still resolving the product, the duplicate-SKU
+  refusal, and the warehouse in-use refusal. No token minter was needed — the
+  dev account is a tenant admin, so the browser's own Firebase sign-in is enough.
+  Only the **superadmin** plane still needs a `users` row that does not exist.
+
+  It found three things, all now fixed and recorded above: a deleted product's
+  Status reading "Active", a deleted product's stock being counted by the
+  warehouse but hidden by the grid, and no success feedback on any action.
+- **Still no superadmin row in the local database**, so `/admin/*` remains
+  unreachable by hand (carried from Phase 3).
+- **Still no frontend tests at all.** §12.5 defines them; Phase 4's brief does
+  not ask for them, and the count is now six more untested screens than it was.
+- **The inventory screens work but read as unintuitive** — reported from the
+  walkthrough, deliberately not acted on, because the three *wrong* things it
+  found were fixed and the rest is polish that no MVP phase owns. Not
+  diagnosed to a single cause; these are the candidates, worth putting in front
+  of a user before rewriting anything:
+  - **Product detail opens as an editable form**, not a summary you click *Edit*
+    on. Every field is live the moment the page loads, so there is no "reading"
+    mode and no obvious point at which you have committed to changing something.
+    This is the biggest one, and the pattern is already inconsistent with
+    `/inventory/warehouses`, which does have an explicit Edit.
+  - **Nothing says a warehouse must exist first.** Stock cannot be held without
+    one, but the empty product list talks about products only, and the
+    consequence surfaces late, as a disabled *Post adjustment* button on a
+    product you have already created.
+  - **"Adjust stock" is the only way to set an opening balance**, and the label
+    does not fit that use. Correct by design — an opening balance is a ledger
+    entry with an author (I6) — but a first-time reader is looking for a
+    quantity field on the create form and does not find one.
+  - **Discontinue / Delete / deleted are three ideas on one screen.** They are
+    genuinely three different things (§6.9.1) and the helper text explains them,
+    but explaining a model in prose is what you do when the controls have not
+    made it obvious.
+  - Toast placement is a live trade-off, not a settled answer: top-right at
+    `top-14` clears the header but can overlap the page action button. See the
+    comment in `components/Toasts.tsx`.
+- **The `/api/warehouses` probe route in `testsupport` is now shadowed in
+  meaning by the real `/api/inventory/warehouses`.** It is a different path and
+  still does its job for the transaction tests, but the name is misleading now
+  that a real warehouses endpoint exists. Not worth churning Group B's fixtures
+  over; worth renaming if that file is touched for another reason.
+- **The §10.7.3 bottom tab bar is still absent.** With one module the sidebar
+  and drawer cover it; revisit when procurement makes three destinations.
+- `go test -race` still cannot run here — no C toolchain on `PATH`. CI runs it.
+- **A password reset email has still not been observed arriving** (carried from
+  Phase 2). Nothing in Phase 4 depends on it.
+- A freshly built API binary is running on `:8080`, having replaced the Phase 3
+  one. `make dev` restarts everything.
+
+**Next:** open [`phases/phase-5-procurement.md`](phases/phase-5-procurement.md)
+in a new session.

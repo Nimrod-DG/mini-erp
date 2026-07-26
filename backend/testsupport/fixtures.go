@@ -253,6 +253,88 @@ func (f *TenantFixture) AsOwner(t *testing.T, fn func(tx *gorm.DB) error) error 
 	return f.db.AsOwner(t, f.ID, fn)
 }
 
+// NewProduct creates a product with an explicit reorder point, for the tests
+// where the reorder threshold is the thing under test (F2).
+func (f *TenantFixture) NewProduct(t *testing.T, name, reorderPoint string) uuid.UUID {
+	t.Helper()
+	n := next()
+	id := uuid.New()
+	f.Must(t, func(tx *gorm.DB) error {
+		return tx.Exec(`
+			INSERT INTO products (id, tenant_id, sku, name, reorder_point, standard_cost)
+			VALUES (?, ?, ?, ?, ?, 10.00)`,
+			id, f.ID, fmt.Sprintf("SKU-%d-F", n), name, reorderPoint).Error
+	})
+	return id
+}
+
+// NewWarehouse creates an extra warehouse.
+func (f *TenantFixture) NewWarehouse(t *testing.T, name string) uuid.UUID {
+	t.Helper()
+	n := next()
+	id := uuid.New()
+	f.Must(t, func(tx *gorm.DB) error {
+		return tx.Exec(`
+			INSERT INTO warehouses (id, tenant_id, code, name)
+			VALUES (?, ?, ?, ?)`, id, f.ID, fmt.Sprintf("WH-%d", n), name).Error
+	})
+	return id
+}
+
+// PostLedger appends one stock ledger row directly, standing in for whatever
+// document would have written it. `qtyDelta` is signed decimal text — never a
+// float, in the fixtures either (I8).
+//
+// It is an INSERT and nothing else: the ledger is append-only (§6.9.3), so
+// there is no fixture that edits one, deliberately. erp_app holds INSERT and
+// has UPDATE and DELETE revoked, so this runs on the same grant the application
+// does.
+func (f *TenantFixture) PostLedger(t *testing.T, productID, warehouseID uuid.UUID, qtyDelta, entryType string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	sourceType := "manual_adjustment"
+	if entryType == "receipt" {
+		sourceType = "goods_receipt"
+	}
+	f.Must(t, func(tx *gorm.DB) error {
+		return tx.Exec(`
+			INSERT INTO stock_ledger
+			  (id, tenant_id, product_id, warehouse_id, entry_type, qty_delta,
+			   unit_cost, source_type, created_by)
+			VALUES (?, ?, ?, ?, ?, ?, 10.00, ?, ?)`,
+			id, f.ID, productID, warehouseID, entryType, qtyDelta,
+			sourceType, f.User.ID).Error
+	})
+	return id
+}
+
+// SetPOStatus moves a purchase order to a status directly, for the arrange half
+// of a test about something else — the in-use checks care only whether a PO is
+// still open.
+func (f *TenantFixture) SetPOStatus(t *testing.T, poID uuid.UUID, status string) {
+	t.Helper()
+	// As the owner: the terminal-state trigger refuses an update to a `received`
+	// PO, and these fixtures are setting up the state rather than transitioning
+	// through it.
+	mustExec(t, f.db.Owner, `UPDATE purchase_orders SET status = ? WHERE id = ?`,
+		status, poID)
+}
+
+// NewGoodsReceiptLine adds a receipt line, which is what po_line_status derives
+// qty_received from (G11).
+func (f *TenantFixture) NewGoodsReceiptLine(t *testing.T, grID, poLineID, productID uuid.UUID, qty string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	f.Must(t, func(tx *gorm.DB) error {
+		return tx.Exec(`
+			INSERT INTO goods_receipt_lines
+			  (id, tenant_id, gr_id, po_line_id, product_id, qty_received)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			id, f.ID, grID, poLineID, productID, qty).Error
+	})
+	return id
+}
+
 // NewRequisition creates a requisition in the given status, filling whichever
 // conditional fields that status requires (§6.10.3).
 func (f *TenantFixture) NewRequisition(t *testing.T, status string) uuid.UUID {

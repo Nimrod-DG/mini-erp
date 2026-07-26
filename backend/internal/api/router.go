@@ -16,6 +16,7 @@ import (
 	"github.com/DGosal/mini-erp/backend/internal/auth"
 	"github.com/DGosal/mini-erp/backend/internal/db"
 	"github.com/DGosal/mini-erp/backend/internal/httpx"
+	"github.com/DGosal/mini-erp/backend/internal/identity"
 	"github.com/DGosal/mini-erp/backend/internal/middleware"
 )
 
@@ -112,7 +113,53 @@ func New(deps Deps) *fiber.App {
 	// No DELETE on either group, deliberately. Tenants are suspended and users
 	// are deactivated (§6.9.4, I5) — the route not existing is the enforcement.
 
+	registerInventory(api, s)
+
 	return app
+}
+
+// registerInventory mounts §9.5. The minimum level differs per route, so each
+// carries its own RequireModule rather than the group carrying one: read at
+// `viewer`, adjust stock at `approver`, change master data at `admin`.
+//
+// The DELETE routes here are not an exception to I5 — deleteProduct and
+// deleteWarehouse issue an UPDATE that sets `deleted_at`. The HTTP verb says
+// what the user meant; the SQL says what happens (§6.9.1).
+func registerInventory(api fiber.Router, s *server) {
+	inv := api.Group("/inventory")
+
+	// One gate instance per route, bound at registration. Sharing a single
+	// handler across routes would work — RequireModule holds no state — but the
+	// levels below are then no longer visible next to the paths they guard, and
+	// this table is the readable copy of §9.5.
+	at := func(min identity.RoleLevel) fiber.Handler {
+		return middleware.RequireModule(ModuleInventory, min)
+	}
+	viewer, approver, admin := identity.RoleViewer, identity.RoleApprover, identity.RoleAdmin
+
+	inv.Get("/products", at(viewer), s.listProducts)
+	inv.Post("/products", at(admin), s.createProduct)
+	inv.Get("/products/:id", at(viewer), s.getProduct)
+	inv.Patch("/products/:id", at(admin), s.patchProduct)
+	inv.Delete("/products/:id", at(admin), s.deleteProduct)
+	inv.Post("/products/:id/restore", at(admin), s.restoreProduct)
+
+	inv.Get("/warehouses", at(viewer), s.listWarehouses)
+	inv.Post("/warehouses", at(admin), s.createWarehouse)
+	inv.Get("/warehouses/:id", at(viewer), s.getWarehouse)
+	inv.Patch("/warehouses/:id", at(admin), s.patchWarehouse)
+	inv.Delete("/warehouses/:id", at(admin), s.deleteWarehouse)
+	inv.Post("/warehouses/:id/restore", at(admin), s.restoreWarehouse)
+
+	inv.Get("/stock", at(viewer), s.listStock)
+	inv.Get("/stock/low", at(viewer), s.listLowStock)
+	inv.Get("/ledger", at(viewer), s.listLedger)
+
+	// The only endpoint that appends to the ledger by hand. `approver`, not
+	// `user`: correcting stock without a document behind it is a decision, and
+	// the person who counted the shelf is not always the person who may say the
+	// count was wrong.
+	inv.Post("/adjustments", at(approver), s.createAdjustment)
 }
 
 // errorHandler renders anything that escapes a handler in the §9.8 envelope.

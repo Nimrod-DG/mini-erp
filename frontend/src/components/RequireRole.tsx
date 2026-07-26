@@ -2,6 +2,28 @@ import { Navigate } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { useMe } from "../hooks/useAuth";
+import type { ModuleCode } from "../lib/api";
+
+/**
+ * RequireModule keeps a module's screens out of the router for someone who
+ * holds nothing in it, the same way the sidebar keeps them out of the nav.
+ *
+ * Cosmetic, like every guard in this file: RequireModule on the server refuses
+ * the same requests with `module_not_enabled` or `insufficient_module_role`,
+ * and deleting this component would make the app render empty screens full of
+ * 403s rather than make anything reachable.
+ */
+export function RequireModule({
+  module,
+  children,
+}: {
+  module: ModuleCode;
+  children: ReactNode;
+}) {
+  const me = useMe();
+  if (!me.moduleRoles[module]) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 
 /**
  * Route guards for the two control planes (§5.7).

@@ -169,6 +169,13 @@ func (h *Harness) Put(t *testing.T, path, token string, body any) *http.Response
 	return h.Request(t, http.MethodPut, path, token, body)
 }
 
+// Delete carries no body. Every DELETE this API answers is a soft delete whose
+// only input is the path (§6.9.1).
+func (h *Harness) Delete(t *testing.T, path, token string) *http.Response {
+	t.Helper()
+	return h.Request(t, http.MethodDelete, path, token, nil)
+}
+
 // --------------------------------------------------------------------------
 // Reading responses.
 // --------------------------------------------------------------------------
