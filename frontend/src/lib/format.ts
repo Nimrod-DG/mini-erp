@@ -45,10 +45,3 @@ export function formatDateTime(iso: string, timeZone: string): string {
     timeZone,
   }).format(new Date(iso));
 }
-
-export function formatDate(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeZone,
-  }).format(new Date(iso));
-}
