@@ -29,9 +29,44 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 **Phase:** 5 — **DONE** (Session A: requisitions, POs, suppliers, numbering ·
 Session B: the goods receipt, the cross-module transaction)
-**Next action:** the browser walkthrough listed at the end of the Session B log,
-then open [`phases/phase-6-finance.md`](phases/phase-6-finance.md) in a **new
-session**
+**Next action:** open [`phases/phase-6-finance.md`](phases/phase-6-finance.md) in
+a **new session**
+
+### Every browser walkthrough is deliberately deferred to Phase 7
+
+**Decided 2026-07-26. Do not treat an unwalked screen as an oversight before
+then.** Phase 7 already ends with the MVP gate — the full twenty-five-step
+[acceptance test](acceptance-test.md), on a 360px viewport, in both light and dark
+mode — so it is a walkthrough of the whole application by construction. Running
+one per phase as well would mean walking the same flows five times, and the last
+walk is the one that counts because it is the only one performed against the
+finished thing.
+
+**What that means for Phase 7: its acceptance-test run is the first time most of
+this application will have been seen in a browser.** Budget for finding things,
+not just for confirming them. Phase 4 is the calibration — its walkthrough found
+three real problems in about an hour, on one module, one of which
+(`TestDeletedProductsStockStaysVisibleEverywhere`) was a genuine correctness bug
+with a test now standing behind it.
+
+Never opened in a browser:
+
+| Screens | From |
+|---|---|
+| `/admin/tenants`, `/admin/tenants/new`, `/admin/tenants/:id`, `/settings/users`, `/settings/users/new`, `/settings/users/:id` | Phase 3 |
+| the six procurement screens — requisition list, create, detail, PO list, PO detail, suppliers | Phase 5A |
+| `/procurement/orders/:id/receive` and **the §10.3 confirmation panel** | Phase 5B |
+| `/finance` | Phase 6 |
+
+Walked already, and still worth re-walking at the gate: Phase 2's sign-in and
+Phase 4's six inventory screens.
+
+**The approval step needs two people.** The dev account
+(`dgjy2019@gmail.com`) is a tenant admin and so resolves to `admin` in every
+module — but C2 forbids approving your own requisition for *everybody*, admins
+included. So the walk needs a second user holding `procurement: approver`, or the
+approval step cannot be performed at all. Phase 7's seed creates seven users and
+is the natural place for that to stop being a manual step.
 
 Migration files that now exist (`backend/migrations/`), applied in this order by
 `cmd/migrate`:
@@ -242,6 +277,7 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 | 2026-07-26 | The confirmation panel's **finance line does not link**; the inventory line does | §10.3 wants both lines to link, and one of them cannot yet: `/finance` is Phase 6's page (§10.5). Linking early would not even 404 — `App.tsx` redirects unknown paths to the dashboard, so the click would quietly land the reader on the home screen, which is worse than text in the one screenshot this panel exists for. Building the target instead would mean doing two of Phase 6's three build items inside Phase 5, which is what the phase split exists to prevent. So the finance line shows the JE number and both account names and amounts, and carries a `TODO(phase-6)` naming the exact one-line change and why it waits. Recorded in *Current state* as well, because that is what the next session reads. |
 | 2026-07-26 | **`TableHead` and `Column` extracted to `components/ListStates.tsx`**, and all eleven tables in the application adopted it | The receipt form and the receipt history made this the *fourth* copy of the same nineteen lines, and Phase 5A recorded the trigger in as many words: "worth another look if Session B adds a third of either". Only the heading row moved. The cells stay with their screen, because a column's content is where the decisions live — a link target, a deleted-product marker, a signed delta — and a config object rich enough for those would grow a case per column type. `MasterDataList` already had a private copy of exactly this loop, so `Column` moved to sit beside the shared version and `MasterDataList` now renders `<TableHead columns={columns} />` like everything else. Clone groups fell from 15 to 10. **`Column` has exactly one import path**: an `export type { Column }` re-export from `MasterDataList` shipped briefly and was removed — one type reachable by two paths is the same failure as one URL spelled two ways, and it is how a later screen ends up importing the "other" `Column` and nobody noticing they have drifted. `WarehouseList` and `SupplierList` import it from `ListStates` alongside the component that consumes it. |
 | 2026-07-26 | `OrderDetailPage` was split into `OrderSummary`, `OrderLines`, `OrderProgress`, `CancelOrderPanel`, and `ReceiptHistory` | The receipt history and the two Receive-goods entry points took it to 299 lines and 20 cyclomatic — CRITICAL, and worse than `RequisitionDetailPage` was before Session A split it the same way. Now 104 lines and 13. `CancelOrderPanel` owns its own three state variables, because whether a reason box is open is nothing the rest of the screen needs to know. Still labelled CRITICAL, like its requisition twin, and further splitting would fragment a page component for a metric's sake. |
+| 2026-07-26 | **Every browser walkthrough is deferred to Phase 7 and done in one pass**, rather than one per phase | Phase 7's MVP gate is already the full twenty-five-step acceptance test at 360px in both themes, which walks the whole application — so a per-phase walk means walking the same flows five times, and only the last one is performed against the finished thing. The cost is real and is written down rather than glossed: problems then arrive in bulk, and Phase 4's walk found three in an hour on one module. Recorded prominently in *Current state* with the list of screens nobody has opened, because "no walkthrough yet" must not read as an oversight to the session that finds it. |
 | 2026-07-26 | The local superadmin was provisioned by a throwaway, deleted after use, rather than by `cmd/seed` | Carried from Phase 3 — `/admin/*` had been unreachable by hand for three phases. Phase 7 owns the seed script and §3.5.3 already specifies the deterministic-UID shape it should take, so building it now would be doing that work twice and probably differently. The throwaway followed §3.3's order (provider account first, row second, compensating delete on failure); the account and the SQL are recorded below so the next person does not need the program. |
 
 ---
@@ -1179,13 +1215,12 @@ four worth knowing before Phase 6:
 **Known broken / left half-done:**
 
 - **No live browser walkthrough of the goods receipt, or of Session A's six
-  screens** (carried). This is now the largest gap in the phase: the confirmation
-  panel is the screenshot the project exists for and nobody has seen it rendered.
-  It needs a second user with `procurement: approver` — the dev account
-  (`dgjy2019@gmail.com`) is a tenant admin and so cannot approve its own
-  requisition — and the walk is: raise → submit → approve as the second user →
-  Receive goods → partial → receive the rest. Phase 4's walkthrough found three
-  real problems in an hour, so this is worth doing before Phase 6.
+  screens** — and this is now **deliberate, not outstanding**: every walkthrough is
+  consolidated into Phase 7's acceptance-test run. See the block in *Current
+  state*, which is where a later session will look. The confirmation panel is the
+  screenshot the project exists for and nobody has seen it rendered, so Phase 7
+  should walk `raise → submit → approve as a second user → Receive goods →
+  partial → receive the rest` early rather than last.
 - **The API on `:8080` is still the Session A binary.** The spare-port instance
   used for the live check was stopped again; `make dev` picks up the receipt
   routes.
@@ -1211,5 +1246,6 @@ four worth knowing before Phase 6:
 - The five inventory-screen readability candidates from Phase 4 are **still open**,
   deliberately.
 
-**Next:** the walkthrough above, then
-[`phases/phase-6-finance.md`](phases/phase-6-finance.md) in a new session.
+**Next:** [`phases/phase-6-finance.md`](phases/phase-6-finance.md) in a new
+session. The browser walkthrough is **not** next: it and every other one belong to
+Phase 7's acceptance-test run — see *Current state*.
