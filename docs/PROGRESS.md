@@ -2326,3 +2326,33 @@ passwords, not losing the deployment.
 
 **Next:** step 1 is not an engineering task. Everything downstream of it is
 about twenty minutes.
+
+---
+
+## Priority change — 2026-07-27
+
+**The next session is Phase 10, and it happens in the other repository.**
+
+Deployment is parked, not abandoned: the database and the frontend are live, the
+backend is blocked on a payment method rather than on anything in the code, and
+`docs/DEPLOY.md` plus `deploy/deploy-api.sh` and `render.yaml` are ready for
+whenever that clears. See the Phase 9 Session B log above.
+
+The goal is now to get this project into the developer's portfolio site:
+
+| | |
+|---|---|
+| Where the work happens | **`D:\Work\lw-sports-portfolio`** (`Nimrod-DG/portofolio`, branch `main`) |
+| The plan | **`D:\Work\lw-sports-portfolio\PLAN-mini-erp.md`** — self-contained; start a session in that directory |
+| This repository's role | Read-only source material, plus a Phase 10 entry appended here when the write-up exists |
+
+The plan covers: rebuilding the local seeded database, a Playwright capture
+script, a 27-shot list spanning **procurement, inventory, finance, tenants,
+users, responsive and both themes**, the case-study sections to write, and the
+one structural problem in the portfolio page — its project nav has hardcoded
+section IDs that collide when a second case study is added.
+
+The wording for deployment is fixed and should not drift: **deploy-ready, not
+deployed.** Screenshots come from the app running locally. The deployed frontend
+is **not** to be linked as "Live" — it stops at the login screen, because it was
+built against a placeholder API URL.
