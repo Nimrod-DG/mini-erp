@@ -30,6 +30,20 @@ Config values live in [`reference/env-setup.md`](reference/env-setup.md).
 
 ## Current state
 
+> ### ✅ Closed 2026-07-27: **the portfolio has been renewed**
+>
+> Four UI passes landed on **2026-07-27** — pagination, table chrome, the header,
+> the filter row, and the dashboard (rebuilt twice) — and left every screenshot
+> and every UI paragraph in the write-up describing an application that no longer
+> existed. All thirty-one screenshots have been retaken against the running
+> application and the stale prose is rewritten; architecture, schema, RLS,
+> permissions and the API were **unaffected and were not touched**.
+>
+> See [The portfolio, renewed](#the-portfolio-renewed--2026-07-27) at the bottom
+> of this file. The application was walked in a real browser first, in both
+> themes at 360px and 1440px, which is what the four entries above had left
+> outstanding.
+
 **Phase:** 9 — **the repository half is done and rehearsed; nothing is deployed
 yet.** Everything that had to change in code, SQL or configuration for this
 application to run on Neon + Cloud Run + Firebase Hosting now exists and has been
@@ -324,6 +338,19 @@ docs — see [`AUDIT.md`](AUDIT.md) for what changed. Nothing there is outstandi
 
 | Date | Decision | Why |
 |---|---|---|
+| 2026-07-27 | **The dashboard no longer offers §10.7.1's "two-button decision"** | The approval queue panel was the only place a requisition could be approved without opening it, and §10.7.1 asks for exactly that — a manager deciding between meetings on a phone. It was also, as a *panel*, the "Awaiting approval" stat tile said twice: same count, same destination. The owner chose the de-duplication after looking at the built screen, and the loss is real rather than notional. First thing to reverse if it bites; the cheap way back is inline Approve/Reject on the requisition **list** rows, not a second dashboard panel. |
+| 2026-07-27 | **The dashboard's activity table filters and pages in the browser**, unlike every other list in the application | `/api/dashboard/summary` returns exactly fifteen movements with no `q` and no paging, and the widget is *defined* as the last fifteen — so there is no second page to disagree with, and the objection that kills client-side filtering elsewhere ("3 drafts" for a tenant with forty) does not arise. Querying `/api/inventory/ledger` instead would have made the dashboard a second copy of that screen. The hazard is that the box looks like five server-side ones, so the scope is stated under the heading on every render, the filter options are derived from the rows so none is a dead end, and the empty state offers the full ledger. |
+| 2026-07-27 | **The dashboard's headline numbers left their widgets for one stat strip** | §10.2 names four widgets and says what data is on the screen; it does not fix the layout, and the layout was the problem. Each widget leading with its own figure put the three numbers a reader scans for at three heights in two columns, which is the one thing a dashboard must not do. All four widgets and their server-side entitlement filtering are unchanged. |
+| 2026-07-27 | **`FilterDropdown` is a hand-written listbox, not a styled `<select>`** | The native element would have been free and would have inherited its roles, keyboard handling and focus behaviour from the platform — all of which now have to be written out and held in place by tests (FE31 is mostly about exactly that). What it cannot do is draw its *open* state in this application's colours, because the popup belongs to the OS. On the stock grid and the ledger the filter row is the only chrome above a table of numbers, which is where an OS-coloured menu reads as a different program. The trade went the other way for the page-size picker in the pagination bar, which is still a native `<select>`: that one is three digits in a corner, not the primary control on the screen. |
+| 2026-07-27 | **`StatusFilter`'s chips were replaced by a status dropdown**, changing how §10.3's filter is presented | The filter row had to become one line with a search box, and five chips plus a search box do not fit — nor would a sixth status have. §10.3 asks for a status filter, not for chips specifically. What the chips were really enforcing is untouched: the status is a server parameter, never a `.filter()` over the fetched page, because filtering one page reports "3 drafts" for a tenant with forty. |
+| 2026-07-27 | **The requisition list gained a `?supplierId=` filter** | The only server-side change in three restyling passes, and it is a real feature rather than presentation. `r.supplier_id` is nullable — a draft need not name a supplier until approval (§8.3) — so filtering by one necessarily excludes drafts that have not chosen. That is the honest answer to "what are we buying from Acme", not something to paper over with a `COALESCE`. |
+| 2026-07-27 | **The theme control stays three states, as icons, rather than becoming the reference header's single moon button** | A two-way flip cannot express `system`, which §10.8.3 requires *and* makes the default — so the first press would silently opt the user out of following the OS, permanently and with nothing on screen to say so. FE11 (the `prefers-color-scheme` listener) would have no state left to run in. The icons get most of the visual change for none of that cost. The labels survive as `sr-only` text rather than an `aria-label`, so they are still what `textContent` reports and an icon-only rewrite cannot quietly drop them. |
+| 2026-07-27 | **The account menu has no Edit profile and no Change password**, though the reference header carries both | Neither has anything behind it. A profile edit needs a `PATCH /api/me` that does not exist and was never in scope; a password change belongs to Firebase, which already owns the reset flow reachable from the sign-in screen. A menu item that opens nothing is worse than an absent one — it reads as broken rather than as unbuilt. |
+| 2026-07-27 | **The frontend's default page size is 5, not `httpx.DefaultPageSize`'s 25** | The two numbers are allowed to differ: the server's default is what an API client gets when it says nothing, and this is a presentation choice about a screen — every list now sends an explicit size, so the server's default is never reached. At 25 the seeded workspaces are a single page (nine products, six orders), which meant the page controls had nothing to draw and the pagination read as missing. Five fits on a phone without scrolling and makes the paging visible on the demo's own data; anybody who wants the whole list has the picker, which now starts at 5 and goes to 100. |
+| 2026-07-27 | **The page controls are rendered on a single-page list too**, with Previous and Next disabled | The first cut hid them behind `totalPages > 1`, which on a nine-row list left the right-hand half of the bar empty and nothing to indicate the bar was pagination rather than a caption. A disabled control still says what the thing is and what would happen if there were more rows. This matches the reference implementation the styling came from. |
+| 2026-07-27 | **A fourth background token, `--ch-bg-subtle`**, not in `reference/design-system.md` §10.8.1 | The doc's `raised` is `#FFFFFF` in light mode and that is right for what it names — an elevated surface on white is white plus a shadow. But `bg-raised` had also been used for four *recessed* things sitting on a `bg-surface` that is also white: the table header band, every row hover, the sidebar's active-item fill, and the skeleton bars. All four were white-on-white and did nothing in light mode, which meant the loading state of every list screen was, in light mode, an empty table. Recessed is a different role from elevated, so it gets its own value per theme rather than borrowing one that means something else. In dark mode there is no collision and it is the same value as `raised`. |
+| 2026-07-27 | **A table's sticky header draws its bottom edge with `shadow-hairline`, not `border-b`** | Tailwind's preflight sets `border-collapse: collapse` on every table, and under a collapsed border model the border belongs to the *table*, not to the cell — so it does not travel with a `position: sticky` cell. The line under the header slides up and off while the header stays. A shadow is painted by the cell. The same reasoning moved `sticky` itself from the `<thead>` to the `<th>`: Chrome ignores `position: sticky` on a row group outright, so the previous markup had a sticky header that was not sticky in the browser while looking correct in the source. |
+| 2026-07-27 | `shadow-hairline` is a **`@theme` token**, not `shadow-[inset_0_-1px_0_var(--color-hairline)]` | Tailwind v4 has to know the colour at build time to fill `--tw-shadow-color`, and when handed a `var()` inside an arbitrary shadow it emits **nothing at all** — no error, no rule, and a class in the markup that does not exist in the stylesheet. Verified by diffing the built CSS: the same utility with a literal hex emits fine. The token form keeps `rgb(var(--ch-border))` in the output, so it still follows the theme. |
 | 2026-07-26 | **The deployment authenticates against the *dev* Firebase project, and the demo accounts are seeded into it.** `phases/phase-9-deployment.md` step 7 and `reference/auth.md` §3.5.1 both say the opposite | This is a portfolio deployment, and the thing it has to do is let somebody who has no credentials from the developer sign in and walk the acceptance test. A clean `erp-prod` pool would mean handing out a password by hand to every reader. The dev project already holds the eight §15 accounts at deterministic UIDs. The cost is stated rather than hidden: the live URL is a demo, `password123` is public, and nothing real goes in it. If the application ever holds real records, this is the first decision to reverse — nothing depends on it but two env vars. |
 | 2026-07-26 | **I3 is asserted for `erp_app` and `erp_admin`, and *reported* for `erp_migrate`** | The open question Phase 8 wrote down. Locally `erp_migrate` **is** the container's superuser — `docker-compose.yml` boots Postgres as it and nothing else could create the schema — so a hard assertion would fail every local run, and a check that always fails is a check nobody reads. On a managed host it is an ordinary role and 005's `FORCE ROW LEVEL SECURITY` is exactly what lets the owner be unprivileged. So `cmd/dbverify` fails on the two application roles and warns on the owner, and the warning is a finding in a deployment. |
 | 2026-07-26 | **`000_roles.sql` no longer forces the role attributes it asserts**, and `GRANT CONNECT` names `current_database()` rather than the literal `erp` | The file is re-applied by `make migrate` on every run, including against a managed host where the migrate role is not a superuser. PostgreSQL requires superuser to touch `SUPERUSER`/`BYPASSRLS` **even to turn them off**, and to `ALTER ROLE` a role you have no ADMIN on — so the previous file aborted the first production migration with `must be superuser to alter superuser roles`, an error that reads like a schema fault. Every privileged statement is now attempted and skipped, and I3 is asserted from `pg_roles` afterwards, which needs no privilege. That is the stronger claim anyway: forcing an attribute and checking it are not the same thing, and only the check catches a role provisioned through a console. |
@@ -2472,6 +2499,569 @@ Tests green: unchanged from the entry above — 376 backend, 102 frontend, 11
 
 Next: nothing outstanding for Phase 10. Phase 11 (the audit log) is the next
 build work, and remains post-MVP.
+
+---
+
+## List pagination and table chrome — 2026-07-27
+
+Not a phase. A requested pass over every list screen: real pagination on the
+frontend, and the table styling borrowed from `deus-null`'s data tables while
+keeping this application's own palette.
+
+Done: **the page size is now a control, and the end of a list is one press
+away.** `httpx.ParseList` has always read `?pageSize=` and clamped it at 100, and
+`lib/api.ts` has always known how to serialise it — nothing on screen ever sent
+one, and the only controls were Previous and Next. A forty-page ledger therefore
+had its oldest row forty presses away, and the sole page size was 25.
+
+| New | What it is |
+|---|---|
+| `lib/pagination.ts` | The pure half: `PAGE_SIZE_OPTIONS` (5/10/25/50/100 — 100 is `httpx.MaxPageSize`, and offering more would be offering a lie), `DEFAULT_PAGE_SIZE`, and `pageWindow` |
+| `hooks/usePagination.ts` | Page and size as one piece of state, because changing the size *must* reset to page 1 and every screen that forgot would strand its reader. `key` is the fragment callers splice into their `useAsync` cache key — the same bug from the other end |
+| `TableFrame` in `ListStates.tsx` | The plain table shell, extracted at the sixth copy. `ScrollableTable` and it now share one `tableFrame` string, which is how their radius and border stopped drifting apart |
+| `tableRow` in `ListStates.tsx` | The one `<tr>` class every data table uses |
+
+`Pagination` gained the size picker, numbered page buttons and the range
+sentence. `pageWindow` keeps the row to at most seven numbers with an ellipsis
+either side, always including the first and the last — the point of numbers at
+all. `onPageSize` is optional, so a list with no meaningful choice (the dashboard
+widgets ask for five and mean five) renders no picker rather than an inert one.
+
+**Two things were wrong in the first cut and were corrected the same day, both
+found by looking at the running application** — which is exactly what the note at
+the bottom of this entry said had not been done:
+
+- **The default page size is 5, not `httpx.DefaultPageSize`'s 25.** At 25 the
+  seeded workspaces (nine products, six orders) were a single page, so the
+  numbers had nothing to draw and the feature looked absent. See *Decisions*.
+- **The page controls render on a single page too**, with Previous and Next
+  disabled and the one number lit. Hiding them left the right-hand half of the
+  bar empty with nothing to say the bar was pagination at all.
+
+**All eight list screens now send `pageSize` and offer the picker:** workspaces,
+users, products, warehouses, suppliers, stock, ledger, requisitions, orders,
+journal. `MasterDataList` and `ResponsiveList` carry it for the five that go
+through them.
+
+**The styling pass found a real defect, and it is the reason for a new token.**
+`--ch-bg-raised` is `255 255 255` in light mode by design (§10.8.1 — an elevated
+surface on white *is* white, plus a shadow). But `bg-raised` was being used for
+recessed things as well, against a `bg-surface` that is also white: **the table
+header band, every row hover, the sidebar's active-item fill, and the skeleton
+bars were all white-on-white and did nothing in light mode.** The loading state
+of every list was, in light mode, an empty table. So `--ch-bg-subtle` was added —
+recessed, `#F1F1EF` light and the same as `raised` in dark, where no collision
+exists — and those four uses moved to it. `raised` keeps its meaning.
+
+Tests green: **115 frontend** (102 + 13 new), backend untouched.
+
+- **FE24** — `pageWindow`: bounded at seven buttons however long the list, always
+  offers first and last, marks only the genuinely skipped stretches, and always
+  contains the current page. `pageWindow(1, 8)` is pinned because 8 is the first
+  total that cannot be drawn whole.
+- **FE25** — the first request asks for 5, the size reaches the server, changing
+  it resets to page 1, and no option exceeds what the server will honour. The
+  picker's accessible name is "Show entries", from the words around it rather
+  than an `aria-label` saying something else (WCAG 2.5.3).
+- **FE26** — a page is reachable by number (page 27 of 27 from page 1, in one
+  press), the current one carries `aria-current="page"` and not only a colour,
+  Previous/Next keep their words as their accessible names at 360px, the range
+  names the short last page correctly, the controls are still drawn and disabled
+  on a single page, and there is no pagination at all when there are no rows.
+
+Deviations from spec: three, all recorded in *Decisions taken* — the new
+`--ch-bg-subtle` token, the sticky header's shadow instead of a border, and the
+`shadow-hairline` theme token that Tailwind v4 forced.
+
+TODO(post-mvp) markers added: none.
+
+Fixed in passing: `responsive.test.tsx`'s "renders a semantic table on a desktop"
+awaited `findByRole("table")` and then counted rows — but `SkeletonRows` renders
+inside that same `<table>`, so on a slow run it counted five skeleton rows
+instead of two documents. It now waits for a row's content. Pre-existing, and
+intermittent; it surfaced twice in about ten full runs.
+
+Next: nothing outstanding. **Light mode has now been looked at** — the products
+and purchase-order lists, which is what produced the two corrections above. Still
+unverified in a browser: dark mode, the 360px layout of the pagination row, and
+the sticky-header shadow on the three scrolling grids. Those belong to the
+browser walkthrough that is still Phase 9's gate.
+
+---
+
+## The header — 2026-07-27
+
+Also not a phase. The same restyling pass applied to `AppShell`'s top bar, again
+against `deus-null` as the reference.
+
+Done: **identity moved off the bar and behind one control.** The header used to
+spell it out along its width — two role badges, the full name, a Sign out button,
+and a three-word theme switch — which at 1280px left the middle empty and at
+360px wrapped onto a second row, pushing every screen down 44px. It is now:
+
+```
+[☰]  mini-erp  Nusantara Retail          [☀|☾|▣]  [ (BS) Budi Santoso ⌄ ]
+```
+
+| New | What it is |
+|---|---|
+| `components/UserMenu.tsx` | The avatar button and the menu behind it — name, email, `<workspace> · <role>`, the module levels as a definition list, and Sign out. Dismisses on outside click and on Escape, and Escape returns focus to the trigger |
+| `ThemeToggle`, rewritten | Still a three-state `radiogroup`, now three icon buttons in a pill rather than three words |
+
+`RoleBadges` is gone from `AppShell` — the levels it rendered are the `RoleRows`
+inside the menu. The header's own `flex-wrap` went with it, which is what makes
+the one-row claim hold at 360px.
+
+**The workspace name stayed on the bar** while the person's name did not. They
+are different things: the workspace says which set of books every screen below is
+showing, and it changes what the data *means*; the name only says who is looking.
+
+**Two deliberate departures from the reference**, both in *Decisions*: the theme
+control is still three states rather than a single moon, and there is no Edit
+profile or Change password item.
+
+Tests green: **121 frontend** (115 + 6 new). Backend untouched.
+
+- **FE30** — the trigger carries the person's name as its accessible name; the
+  menu's contents are out of the tree while closed, so a screen reader cannot
+  reach a Sign out that a pointer cannot; the panel names the workspace and the
+  levels held, omitting modules the identity has none in (§10.1's rule, same as
+  the sidebar); it reads correctly for the platform account, which has
+  `tenant: null` and no modules; signing out lands on `/login`; Escape closes and
+  restores focus; an outside click closes.
+
+Deviations from spec: the two above. No naming-contract strings changed.
+
+TODO(post-mvp) markers added: none.
+
+Fixed in passing, and it is the same bug as last time: `presentation.test.tsx`'s
+four `assertNumericColumns` cases called `findByRole("table")` and asserted
+immediately, but `SkeletonRows` renders inside that same `<table>` and a skeleton
+cell has neither `text-right` nor `tabular`. Green when MSW answered inside the
+first render, red when it did not. There is now a `findLoadedTable` helper that
+waits for the pulse to go. **Two of these have now surfaced, in two different
+files — `findByRole("table")` immediately followed by an assertion about cells is
+a bad pattern in this codebase**, because the loading state is inside the table
+rather than instead of it.
+
+Also corrected: the new tests from the entry above were numbered FE24–FE26, which
+collided with `masterdata`'s FE22–FE25 and `presentation`'s FE26. `tests.md`
+defines FE1–FE26, so anything beyond the spec starts at FE27. Pagination is now
+FE27–FE29 and the header is FE30.
+
+Next: nothing outstanding. **Dark mode still has not been looked at in a
+browser**, and it is the obvious risk in this change — the avatar's `text-canvas`
+on `bg-accent`, the menu's `shadow-lg` over `bg-surface`, and the selected theme
+icon all need seeing on the near-black canvas.
+
+*Dark mode was checked by the developer immediately after and is fine.*
+
+---
+
+## The filter row — 2026-07-27
+
+Third and last of the restyling passes. **The first one to change the backend.**
+
+Done: every list screen's filters are now one row — a search box that takes the
+slack, and dropdowns that hold their width.
+
+| New | What it is |
+|---|---|
+| `components/Filters.tsx` | `FilterBar` (the row), `SearchInput` (icon inside the field, name on `aria-label`), and `FilterDropdown` |
+| `GET /api/procurement/requisitions?supplierId=` | New. The one thing here that is not presentation |
+
+**What each screen has now.** Requisitions: search + status + **supplier (new)**.
+Purchase orders: search + status + supplier. Stock on hand: search + warehouse.
+Ledger: search + warehouse + movement + source. Products, warehouses, suppliers,
+workspaces and users all take the same `SearchInput`, so there is one search box
+in the application rather than six copies of one.
+
+**`StatusFilter` is gone.** Five chips plus a search box cannot share a line, and
+the chips scaled worst — a sixth status would have wrapped. The rule they existed
+to enforce is unchanged and now lives in the dropdown's `onChange`: status is a
+*server* parameter, never a `.filter()` over the fetched page, because filtering
+one page reports "3 drafts" for a tenant with forty.
+
+**The visible "Search" caption is gone too.** It said nothing the placeholder did
+not — "SKU or name" already tells you both that it is a search and what it
+searches — and it forced every filter row two lines tall before a single control
+had been placed. The accessible name survives on `aria-label`, and it names the
+noun ("Search requisitions"), because a screen reader user landing on the field
+has no column headings for context.
+
+**`FilterDropdown` is a custom widget, and that is a real cost.** A styled
+`<select>` would have been free and would have inherited its roles, keyboard and
+focus handling from the platform. What it cannot do is render its *open* state in
+this application's colours — the popup belongs to the OS — and on the two dense
+grids the filter row is the only chrome above a table of numbers, which is
+exactly where an OS-coloured menu looks like a different program. So the keyboard
+is written out: Enter/Space/↓ open, arrows and Home/End move, Enter picks, Escape
+cancels and restores focus, Tab closes. Focus never leaves the trigger;
+`aria-activedescendant` is what moves.
+
+**Responsiveness is in the search box, as asked** — it is `flex-1` with a 14rem
+floor and the dropdowns are a fixed 176px from `sm` up. Below `sm` the dropdowns
+share the row instead of holding 176px, so two fit at 360px and the ledger's
+third wraps. A hard width there put every dropdown on a row of its own.
+
+Tests green: **129 frontend** (121 + 8 new), **backend unchanged and still green**
+(the supplier filter is covered inside `TestProcurementListsFollowTheListContract`).
+
+- **FE31** — the search box's accessible name and that typing reaches `?q=`;
+  status and supplier both reach the server and narrow *together* rather than one
+  replacing the other; "All statuses" removes the parameter rather than sending
+  an empty one; the roles a `<select>` would have declared are declared; open,
+  move and pick from the keyboard alone with focus staying on the trigger;
+  Escape cancels without applying the highlighted row; the list opens on the
+  current value rather than at the top; an outside click closes it.
+- FE12's chip case became a dropdown case — same claim, that which filter is
+  active is legible without colour.
+
+Deviations from spec: `StatusFilter`'s removal changes how §10.3's status filter
+is *presented*. The section asks for a status filter, not for chips specifically,
+and the server contract behind it is untouched.
+
+TODO(post-mvp) markers added: none.
+
+**One environment note, not a code problem.** `go test ./...` intermittently
+fails four or five packages at once with *"rootless Docker is not supported on
+Windows"* — several packages starting testcontainers simultaneously. `go test
+./... -p 1` is green every time. Worth knowing before someone reads a red run as
+a regression.
+
+Next: nothing outstanding. The filter row has not been seen at 360px in a
+browser, which is the one claim above that jsdom cannot check.
+
+---
+
+## The dashboard — 2026-07-27
+
+Done: `/` rebuilt. §10.2's four widgets are all still there and still
+server-filtered by entitlement; what changed is the arrangement, which is what
+was wrong.
+
+**The diagnosis, from a screenshot of the real thing.** It was four cards in two
+independent flex columns, each card leading with its own big number, and three
+things followed:
+
+1. **The numbers could not be compared.** The three figures a reader scans for —
+   3 open orders, 3 awaiting approval, 3 low — sat at three different heights in
+   two different columns, with a table and a decision queue between them.
+2. **The loudest thing on the page was a button.** Two full-width Approve/Reject
+   buttons per queued requisition, in a half-width column, made the hierarchy say
+   *the most important item here is a control*.
+3. **The bottom was ragged.** Two independent columns cannot end level; a short
+   left column left several hundred pixels of nothing beside a long right one.
+
+**What replaces it is three bands, in the order a reader needs them.**
+
+```
+[ the numbers ]      one row of stat tiles — same size, one baseline
+[ what needs you ]   full width, the only thing to act on
+[ for reference ]    two columns, both list-shaped, so they end level
+```
+
+| New / changed | What it is |
+|---|---|
+| `StatTile` + `StatStrip` | The headline numbers, as a `<ul>` of tiles. Label · value · **one supporting fact** |
+| `ApprovalQueue` | Full width. A requisition is now one horizontal row — number, who, how much, decide — not a stacked card |
+| `LowStockCard`, `RecentActivityCard` | The figures they led with are gone; each is now just its list |
+| `WidgetFigure` | Deleted. Its job moved to `StatTile` |
+| `WidgetCard` | Gained `flush`, for a body that is a full-bleed list and owns its own padding |
+
+**Tile order is fixed and is by urgency** — what needs a decision, then what is at
+risk, then what is in flight — and stays in that order whichever subset an
+identity gets. A strip whose order depends on your entitlements is a strip you
+read rather than recognise.
+
+**Every tile carries a fact, not a naked number.** "3" is a figure you have to
+open something to understand; "PKG-BOX-S short 60 pcs" is the thing to do
+something about. Low stock names its worst product, open orders their value,
+approvals whether they are yours to decide.
+
+**Two things came from the `dataviz` skill and are worth keeping.**
+
+- *A handful of headline numbers is a KPI row of stat tiles* — which is exactly
+  the shape the old screen was failing to be.
+- *Proportional figures for display numbers; `tabular` only in columns.* The old
+  `WidgetFigure` was `tabular` at 30px, which gives every digit the width of a
+  zero and makes a standalone number look gappy. `StatTile` uses the font's own
+  spacing; the tables keep `tabular`, which is what it is for.
+- Also from it: **status is carried by a mark, not by the value's ink.** The
+  warning dot sits beside the *label*; the number stays in primary ink whatever
+  it says. A status hue on a 36px numeral turns the tile into an alarm, and
+  colour is never the only channel anyway (§10.8.4) — the words say it too.
+
+**The queue panel now appears only when there is a decision in it.** A caller who
+cannot approve has an empty `queue` by design, so the old card was a heading over
+the sentence "An approver has to make these decisions". Their tile carries the
+count instead. And a requisition that *cannot* be decided here — your own (C2), or
+one with no supplier — shows the reason rather than a disabled button: a control
+that can never work is not a control.
+
+**One real bug fell out of the redesign.** The approval tile links to
+`/procurement/requisitions?status=submitted`, and **the requisition list never
+read that parameter** — `status` was `useState("")`. So the dashboard said three
+were waiting and landed the reader on all thirteen. It has presumably been broken
+since Phase 7, when the widget's `href` was written. The list now seeds the filter
+from the URL, validated against the naming contract. Seeded, not bound: changing
+the dropdown afterwards does not rewrite the URL, which is a smaller change than
+the bug needs.
+
+Tests green: **144 frontend** (129 + 15 new). Backend untouched.
+
+- **FE32** — the strip's order is fixed and survives a caller getting only some
+  tiles; every number has a fact beside it; the zero case says something true
+  rather than showing a bare 0; every tile is a link, and the approval tile's
+  link lands on a list that is *actually* filtered; the queue panel appears for
+  an approver with work and for nobody else; a blocked requisition shows the
+  reason and no buttons; approving happens without leaving `/`; the low-stock
+  shortcut is offered only to somebody who could raise a requisition.
+
+**There were no dashboard tests at all before this**, which is how a screen ends
+up with three big numbers a reader cannot compare and a dead link nobody noticed.
+
+Deviations from spec: none. §10.2 lists the data on this screen, not its layout,
+and all four widgets are still present with the same server-side filtering.
+
+TODO(post-mvp) markers added: none.
+
+Next: superseded within the hour by the entry below — the owner looked at it and
+found it still said things twice.
+
+---
+
+## The dashboard, second pass — 2026-07-27
+
+The entry above rearranged the dashboard and left four things on it. Looking at
+the result, the owner made the sharper call: **two of the four were saying what a
+tile already said**, and the activity feed was still a tall narrow column. So the
+page is now **three numbers and one table**, and nothing else.
+
+```
+Good to see you, Budi
+[ Awaiting approval ] [ Below reorder point ] [ Open purchase orders ]
+
+Recent activity                                            Full ledger
+The last 15 stock movements — the full ledger goes back further.
+[ search ] [ Movement ▾ ] [ Warehouse ▾ ]
+┌──────────────────────────────────────────────────────────────────┐
+│ WHEN   PRODUCT   WAREHOUSE   CHANGE   SOURCE                     │
+└──────────────────────────────────────────────────────────────────┘
+Show [5] entries   Showing 1–5 of 15 entries     [Prev][1][2][3][Next]
+```
+
+**What went, and why it was redundant.**
+
+| Removed | It was |
+|---|---|
+| `ApprovalQueue.tsx` | The "Awaiting approval" tile again, with a list under it. Both linked to the same filtered requisition list |
+| `LowStockCard.tsx` | The "Below reorder point" tile again, listing the rows its destination lists |
+| `RecentActivityCard.tsx` | A narrow feed several times taller than anything beside it — the actual source of the lopsidedness, through three layouts |
+| `WidgetCard.tsx` | The frame those three shared. Nothing left to frame |
+
+**What it cost, and it is a real cost.** §10.7.1 asks for requisition approval as
+"a two-button decision between meetings", and the queue panel was the only place
+that existed. Approving now means opening the requisition. The duplication was
+real and so is the loss; the owner chose, and this is the first thing to reverse
+if the two-button decision turns out to matter more than the tidiness. The
+cheapest way back would be inline Approve/Reject on the requisition *list* rows —
+not a second dashboard panel.
+
+**What it did not cost.** The low-stock panel's "Create requisition" shortcut —
+products pre-filled with the shortfalls the server computed — was the one thing
+on it that duplicated nothing. It moved to `/inventory/stock`'s `LowStockBanner`,
+which is where the tile points and where somebody looking at low stock already
+is. Arguably where it always belonged.
+
+**`ActivityTable` is the new piece, and it has one honest hazard.** Its search box
+and its two dropdowns narrow **the fifteen rows already in the browser**. Every
+other search box in this application is a server parameter, and the difference
+matters — a box that looks identical and silently searches less is exactly the
+kind of thing nobody notices until it misleads them. Three mitigations, all
+deliberate:
+
+- The sentence under the heading says the scope on every render: *"The last 15
+  stock movements — the full ledger goes back further."* It is separate from the
+  pagination line, which counts the *filtered* set.
+- The filter options are **derived from the rows**, so no option is a dead end.
+- The no-matches state says "Nothing in the last 15 movements matches those
+  filters" and offers **Search the full ledger**, because over a fifteen-row
+  window "no results" usually means "not in the last fifteen".
+
+Querying `/api/inventory/ledger` instead would have removed the hazard and turned
+the dashboard into a second copy of that screen. This was the smaller lie to tell
+loudly rather than the bigger one to tell quietly.
+
+**Page size 5**, like every other list, via the same `usePagination` and the same
+`Pagination` component. The widget returns fifteen and rendering all of them made
+the dashboard scroll for nothing.
+
+Tests green: **148 frontend** (144 → 148; the five that described the removed
+panels were replaced). Backend untouched.
+
+- **FE32** now covers: the tile strip (order, facts, zero cases, every tile a
+  link, and the approval tile landing on a genuinely filtered list); that the
+  approval panel and the low-stock panel are *gone* and the tiles are the way in;
+  that the requisition shortcut survived on `/inventory/stock` and is still
+  withheld from somebody who cannot raise one; and the activity table — that it
+  is a table, that it says which set it is narrowing, that search and the
+  dropdowns narrow it, that the options are derived, that empty points at the
+  ledger, five rows a page with paging through the rest, and I7 timestamps.
+
+Deviations from spec: **§10.7.1's two-button decision is no longer on the
+dashboard.** Recorded in *Decisions taken*. §10.2's four widgets are all still
+fetched and still entitlement-filtered server-side; two of them now render as
+tiles rather than panels.
+
+TODO(post-mvp) markers added: none.
+
+Next: **nothing outstanding in the code. What is outstanding is the portfolio.**
+See below.
+
+---
+
+## ~~OUTSTANDING~~ — DONE. The portfolio needed renewing after the 2026-07-27 UI pass
+
+**Closed the same day by [The portfolio, renewed](#the-portfolio-renewed--2026-07-27)
+below.** Kept as written because the next reader needs the diagnosis, not just the
+fix. Four passes landed on 2026-07-27 and they changed how most of the application
+looks. Nothing about the architecture, the schema, RLS, the permission model or
+the API changed — but every screenshot and every UI paragraph in the write-up was
+stale.
+
+**What changed, in one list:**
+
+1. **Pagination** on every list — page-size picker, numbered pages, default 5.
+2. **Table chrome** — header band, row hover, rounded frames; new `--ch-bg-subtle`
+   token, which fixed four things that were invisible in light mode.
+3. **The header** — identity behind one avatar menu, theme as three icon buttons.
+4. **The filter row** — one line of search box plus dropdowns on every list, a new
+   `FilterDropdown`, and a new `?supplierId=` filter on requisitions (**the only
+   backend change in the four passes**).
+5. **The dashboard** — rebuilt twice, ending at three stat tiles over one activity
+   table.
+
+**What to do:**
+
+- [x] **Retake every screenshot.** The old ones show the previous table styling,
+      the old header, the chip filters, and both earlier dashboards. Take them in
+      **both themes** — the light-mode fixes are a visible part of the story.
+- [x] **Refresh the write-up's UI sections.** `README.md` and whatever the
+      portfolio page holds. The architecture, tenancy and permissions sections
+      are unaffected and should not be touched.
+- [x] **Walk it in a browser first, at 360px and at desktop.** Several claims in
+      the four entries above are still only verified by jsdom: the filter row at
+      360px, the sticky-header shadow on the three scrolling grids, the stat strip
+      stacking, and dark mode on the new warning dot and avatar.
+
+**Do not re-plan the UI from the reference docs.** `reference/design-system.md`
+and `reference/screens.md` describe the *pre-2026-07-27* screens in several
+places, and the four entries above are the record of where the built thing now
+deliberately differs — with the reasons. The *Decisions taken* table has each
+deviation as a row.
+
+---
+
+## The portfolio, renewed — 2026-07-27
+
+Closes the checklist above. Work happened in both repositories: the case study
+and the capture tooling in `D:\Work\lw-sports-portfolio`, `README.md` and this
+file here. **No application code was touched** — no `frontend/src`, no
+`backend/internal`, no migrations.
+
+### The browser walk came first, and every open claim held
+
+The database was rebuilt from scratch (`docker compose down -v`, migrate, seed)
+so the demo had no leftovers, and the application was driven with Playwright at
+**1440×900 and 360×780, in both themes**. The four things the entries above could
+only assert through jsdom were looked at:
+
+| Claim | Verdict in a real browser |
+|---|---|
+| The filter row at 360px — search on its own line, two dropdowns sharing the next, the ledger's third wrapping | **Holds.** The ledger is the only screen with three, and it wraps exactly as described |
+| The sticky header keeping its bottom edge on a scrolling grid | **Holds**, in both themes — but only visible at all once the page size is raised, see below |
+| The stat strip stacking | **Holds.** One column, same size, order preserved |
+| Dark mode on the warning dot and the avatar | **Holds** |
+
+Also confirmed by eye, and worth recording because it is the change that is
+hardest to argue for in the abstract: **the light-mode `--ch-bg-subtle` fix is
+plainly visible.** The loading skeleton, the table header band and the row hover
+all read on white now. A capture of the products list mid-load is the proof.
+
+**One near-miss, which was my tooling and not the application.** Playwright's
+`getByLabel("Show entries")` matches nothing, and it would have been easy to
+write that up as FE25 being wrong. It is not: the locator matches the `<label>`
+element's own text, which here also contains every `<option>`. Chrome's
+accessibility tree — read directly over CDP — computes the name as exactly
+`"Show entries"`, and it stays that way after the value changes. FE25 is right.
+
+### Two things the pass broke that only a browser would have found
+
+- **`capture-erp.mjs` could no longer find its own documents.** It resolved
+  document ids by navigating a list and matching link text; with the page size now
+  5, four of the nine products are on a page it never visited, so the run died on
+  `PKG-TAPE`. It now searches for each row first, which also makes the lookup
+  independent of sort order and of how large the seed grows.
+- **Four captions on the case study had become false**, all for the same reason —
+  a five-row page is not the whole list. “Three products below their reorder
+  point” showed one badge; “the five states a requisition can hold” showed three.
+  The five states are now carried by a shot of the **status filter open**, which
+  enumerates them properly, and the count claims are gone.
+
+### Crop fractions are now measured by the capture, not written by hand
+
+The previous fractions were measured once, by a throwaway script, against the old
+screens — and every one of them was wrong afterwards, because the filter row, the
+page size and the pagination bar all move where a screen's content stops.
+`capture-erp.mjs` now measures the bottom of `<main>`'s deepest visible
+descendant as it takes each shot and writes `shots/crop-erp.json`;
+`optimize.mjs` reads that. Two rules sit on top: shots paired in a `.shot-grid`
+take the tallest fraction in the group, or the two frames do not line up, and
+`erp-01` keeps a floor of 0.88 because it is also the project card's 16/9
+thumbnail.
+
+### What the case study says now
+
+Thirty-one shots, up from twenty-seven; twenty-six used on the page, up from
+twenty-two. Four are new and they exist because the four passes are what changed:
+
+| New shot | What it carries |
+|---|---|
+| `erp-28-orders-light` | A list in light mode — the shared shell, and the `bg-subtle` story |
+| `erp-29-filter-open` | The custom listbox open, in the application's own colours, and the five statuses |
+| `erp-30-account-menu` | Identity behind one control, with Finance absent rather than “none” |
+| `erp-31-mobile-filters` | The filter row wrapping at 360px |
+
+`erp-21-sidebar-no-finance` is now captured **with the account menu open**. Its
+caption used to argue from “the two badges in the header”, and those badges no
+longer exist — the menu makes the same point better, because it shows Agus as an
+implicit admin in his two modules with no Finance row at all.
+
+Rewritten prose: the requisition, stock, products and product-form captions
+(count claims and the low-stock shortcut, which now lives on `/inventory/stock`);
+both dashboard captions; the mobile dashboard; and the “what I'd build next”
+item, which claimed page/status/supplier all live in component state — status is
+now seeded from the URL, and sorting is a fixed order per screen rather than no
+`sort` parameter at all.
+
+**The one thing said plainly rather than quietly dropped:** §10.7.1's two-button
+approval is no longer on the dashboard, so the old caption's “the approver's
+whole job without leaving the page” had to go. The dashboard caption now argues
+the layout on its own merits and does not claim a decision the screen cannot
+make.
+
+Tests green: **376 backend** (`go test ./... -p 1`) and **148 frontend** — the
+frontend count was stale as 102 in three places on the case study and two in
+`README.md`, and is corrected. Backend unchanged.
+
+Deviations from spec: none. Nothing in `reference/design-system.md` or
+`reference/screens.md` was used to re-plan anything; the built application was
+the source and this file was the record of where it deliberately differs.
+
+TODO(post-mvp) markers added: none.
+
+Next: unchanged — Phase 9.5, below.
 
 ---
 

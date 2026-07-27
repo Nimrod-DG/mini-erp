@@ -62,7 +62,7 @@ cost.
 | **Identity** | Firebase Authentication (token verification only) |
 | **Local infra** | Docker Compose (PostgreSQL) |
 | **CI** | GitHub Actions, on every push and pull request |
-| **Tests** | 376 backend · 102 frontend |
+| **Tests** | 376 backend · 148 frontend |
 
 ---
 
@@ -371,7 +371,7 @@ this is a local database and none of these people exist.
 | Account | Who they are | Good for seeing |
 |---|---|---|
 | `rina@nusantara.test` | Nusantara **workspace admin** — implicitly admin in all three modules | Everything |
-| `budi@nusantara.test` | staff · procurement **approver**, inventory viewer | The dashboard approval queue; approving a requisition |
+| `budi@nusantara.test` | staff · procurement **approver**, inventory viewer | Approving a requisition; an account menu holding two module levels and no Finance |
 | `sari@nusantara.test` | staff · procurement **user** | Raising a requisition — and that a `user` cannot approve |
 | `dewi@nusantara.test` | staff · finance **admin**, procurement viewer | The Finance module |
 | `agus@bahari.test` | Bahari **workspace admin** — Bahari has **no Finance entitlement** | Entitlement: no Finance link *even for an admin* |
@@ -447,7 +447,7 @@ cd backend  && go test ./... -p 1
 cd frontend && npm run test
 ```
 
-**376 backend tests and 102 frontend tests**, all green.
+**376 backend tests and 148 frontend tests**, all green.
 
 The backend suite runs against **real PostgreSQL in containers**, never a mock or
 SQLite. That is not thoroughness for its own sake: RLS is a property of Postgres
@@ -456,7 +456,10 @@ one mechanism this project exists to demonstrate. `-p 1` runs one package at a
 time because each database-touching package starts its own container.
 
 Test groups A–J and FE1–FE26 are catalogued in
-[`docs/reference/tests.md`](docs/reference/tests.md).
+[`docs/reference/tests.md`](docs/reference/tests.md). FE27–FE32 came later, with
+the 2026-07-27 interface passes — pagination, the account menu, the filter row
+and the dashboard — and are described in the log entries for those passes in
+[`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ### Verifying the database itself
 
@@ -511,8 +514,8 @@ mini-erp/
 ├── frontend/                   # ← the npm project root is HERE
 │   ├── package.json
 │   └── src/
-│       ├── components/         # AppShell, ResponsiveList, StickyActions…
-│       ├── hooks/              # useAuth, useTheme, useCompact
+│       ├── components/         # AppShell, ResponsiveList, Filters, UserMenu…
+│       ├── hooks/              # useAuth, useTheme, useCompact, usePagination
 │       └── pages/              # one directory per module
 └── docs/                       # build documentation — start at docs/PROGRESS.md
 ```
