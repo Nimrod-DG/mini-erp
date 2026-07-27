@@ -2415,3 +2415,60 @@ Next: nothing is blocked here. When a payment method clears, `make deploy-api`
 and then `make deploy-web` with a real `VITE_API_BASE_URL`; at that point the
 portfolio's status section and the `.live` nav slot are the two places that need
 updating.
+
+---
+
+## Phase 10 (continued) — the README · 2026-07-27
+
+Done: `README.md` rewritten in full, which closes the second half of Phase 10 —
+the phase file asks for "a README with an architecture diagram, the RLS
+explanation and the permission model", and the earlier entry above had only
+fixed the run instructions.
+
+What it now contains, in the order a reader needs it:
+
+- **What it is** — three modules, the stack, and "modular monolith, not
+  microservices" stated where nobody can miss it.
+- **An architecture diagram** in Mermaid, so GitHub renders it inline rather than
+  linking a picture that goes stale. It draws the six-step middleware chain
+  explicitly, because the order *is* the design: token → identity from the
+  database → `SET LOCAL` → entitlement × role → handler.
+- **The RLS explanation** — the six-step chain in prose, then the actual policy
+  SQL, including why `WITH CHECK` and the `NULLIF` are both load-bearing.
+- **The permission model** — the three layers, the five ranked levels, the three
+  tenant roles, the two distinguishable 403s, and segregation of duties as the
+  layer-3 example.
+- **The cross-module transaction** — a second Mermaid diagram plus the
+  idempotency-key and savepoint reasoning.
+- **Running it locally** — the section the developer asked to be unambiguous.
+  Numbered from a clean clone, with backend and frontend as *separate* steps in
+  *separate* terminals, each with both its `make` target and the raw command
+  behind it. `make dev` is offered second, with the caveat that it interleaves
+  both logs and needs a POSIX shell.
+- Troubleshooting table, Make-target table, tests, layout, docs index, the
+  invariants I1–I13, honest scope, and deployment status.
+
+Both Mermaid blocks were parsed against mermaid 11 with `htmlLabels: false` and
+`securityLevel: 'strict'` — the conservative configuration GitHub renders with —
+so no `<b>`/`<i>` and no parentheses inside node labels. Every relative link in
+the file was checked to resolve against a real path.
+
+Phase 10 "Done when" — all four met:
+- A reader who has never seen the code can explain the isolation model from the
+  case study alone ✅ (and now from the README alone as well)
+- Screenshots include the cross-module confirmation panel ✅
+- The set covers all three modules plus tenants and users ✅
+- The LW Sports case study still works unchanged ✅ — though it was *deliberately*
+  changed afterwards, see below
+
+Deviation from spec: the portfolio's LW Sports case study is no longer
+byte-for-byte unchanged. Its Cloud Run backend went down for the same reason this
+one is not deployed, so its "Live" link pointed at a login that cannot succeed.
+It now reads "Beta · paused" and links to an explanation. Phase 10's criterion
+meant "do not break it", and it is not broken.
+
+Tests green: unchanged from the entry above — 376 backend, 102 frontend, 11
+`dbverify` checks. No code was touched in this entry, only documentation.
+
+Next: nothing outstanding for Phase 10. Phase 11 (the audit log) is the next
+build work, and remains post-MVP.
