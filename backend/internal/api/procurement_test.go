@@ -1485,6 +1485,36 @@ func TestProcurementListsFollowTheListContract(t *testing.T) {
 		t.Errorf("page 2 starts at %s, but the whole set's third item is %s — the "+
 			"sort is being applied per page", page.Data[0].PRNumber, all.Data[2].PRNumber)
 	}
+
+	// The supplier filter, which the requisition list gained when the status
+	// chips became a dropdown and a second dropdown fitted beside them. Last,
+	// because it adds a sixth requisition and the counts above are over five.
+	// The five so far all name the fixture's supplier; this one names another.
+	other := f.NewSupplier(t, "Other Supplies")
+	elsewhere := createRequisition(t, h, author, map[string]any{
+		"warehouseId": f.WarehouseID.String(),
+		"supplierId":  other.String(),
+		"lines":       []map[string]any{line(f.ProductID, "4", "10.00")},
+	})
+
+	testsupport.AssertErrorCode(t,
+		h.Get(t, "/api/procurement/requisitions?supplierId=not-a-uuid", author),
+		http.StatusBadRequest, "malformed")
+
+	forOther := testsupport.Decode[list[requisition]](t,
+		h.Get(t, "/api/procurement/requisitions?pageSize=100&supplierId="+other.String(), author))
+	if forOther.TotalItems != 1 || forOther.Data[0].ID != elsewhere.ID {
+		t.Errorf("supplierId returned %d rows, want just %s",
+			forOther.TotalItems, elsewhere.PRNumber)
+	}
+
+	// Status and supplier narrow together rather than one replacing the other.
+	both := testsupport.Decode[list[requisition]](t,
+		h.Get(t, "/api/procurement/requisitions?pageSize=100&status=draft&supplierId="+
+			f.SupplierID.String(), author))
+	if both.TotalItems != 3 {
+		t.Errorf("status+supplier: totalItems = %d, want 3", both.TotalItems)
+	}
 }
 
 // Requisition numbers are allocated per tenant and per month, in the

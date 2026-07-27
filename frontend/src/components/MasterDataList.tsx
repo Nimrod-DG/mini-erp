@@ -1,15 +1,19 @@
 import { useState, type ReactNode } from "react";
 
 import { AppShell } from "./AppShell";
+import { FilterBar, SearchInput } from "./Filters";
 import {
   EmptyState,
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableFrame,
   TableHead,
+  tableRow,
   type Column,
 } from "./ListStates";
 import { useAsync } from "../hooks/useAsync";
+import { usePagination } from "../hooks/usePagination";
 import type { ListResponse, MasterDataQuery } from "../lib/api";
 
 /**
@@ -61,17 +65,18 @@ export function MasterDataList<T extends { id: string }>({
   load: (query: MasterDataQuery) => Promise<ListResponse<T>>;
   row: (item: T, onChanged: () => void) => ReactNode;
 }) {
-  const [page, setPage] = useState(1);
+  const { page, pageSize, setPage, setPageSize, key } = usePagination();
   const [search, setSearch] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
   const [adding, setAdding] = useState(false);
   const [nonce, setNonce] = useState(0);
 
   const { state, reload } = useAsync(
-    `${cacheKey}:${page}:${search}:${showDeleted}:${nonce}`,
+    `${cacheKey}:${key}:${search}:${showDeleted}:${nonce}`,
     () =>
       load({
         page,
+        pageSize,
         q: search,
         includeDeleted: canManage && showDeleted,
       }),
@@ -97,23 +102,19 @@ export function MasterDataList<T extends { id: string }>({
           refresh();
         })}
 
-      <div className="mb-4 flex flex-wrap items-end gap-4">
-        <label className="block max-w-sm grow">
-          <span className="mb-1 block text-sm text-secondary">Search</span>
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder={searchPlaceholder}
-            className="min-h-11 w-full rounded-md border border-hairline bg-surface px-3 text-sm"
-          />
-        </label>
+      <FilterBar>
+        <SearchInput
+          label={`Search ${title.toLowerCase()}`}
+          value={search}
+          onChange={(next) => {
+            setSearch(next);
+            setPage(1);
+          }}
+          placeholder={searchPlaceholder}
+        />
 
         {canManage && (
-          <label className="flex min-h-11 items-center gap-2 text-sm">
+          <label className="flex min-h-11 shrink-0 items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={showDeleted}
@@ -126,7 +127,7 @@ export function MasterDataList<T extends { id: string }>({
             Show deleted
           </label>
         )}
-      </div>
+      </FilterBar>
 
       {state.status === "error" ? (
         // A failed *load* stays inline, where the data would have been. A toast
@@ -134,7 +135,7 @@ export function MasterDataList<T extends { id: string }>({
         <ErrorNotice error={state.error} onRetry={reload} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+          <TableFrame>
             <table className={`w-full ${minWidthClass} text-left text-sm`}>
               <TableHead columns={columns} />
 
@@ -155,17 +156,14 @@ export function MasterDataList<T extends { id: string }>({
               {state.status === "ready" && state.data.data.length > 0 && (
                 <tbody>
                   {state.data.data.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="border-t border-hairline hover:bg-raised"
-                    >
+                    <tr key={item.id} className={tableRow}>
                       {row(item, refresh)}
                     </tr>
                   ))}
                 </tbody>
               )}
             </table>
-          </div>
+          </TableFrame>
 
           {state.status === "ready" && (
             <Pagination
@@ -174,6 +172,7 @@ export function MasterDataList<T extends { id: string }>({
               totalItems={state.data.totalItems}
               totalPages={state.data.totalPages}
               onPage={setPage}
+              onPageSize={setPageSize}
             />
           )}
         </>

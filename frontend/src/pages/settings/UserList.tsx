@@ -2,15 +2,19 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
+import { FilterBar, SearchInput } from "../../components/Filters";
 import {
   EmptyState,
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableFrame,
   TableHead,
+  tableRow,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
+import { usePagination } from "../../hooks/usePagination";
 import {
   listTenantUsers,
   type ModuleCode,
@@ -71,11 +75,11 @@ function EffectiveLevels({
 /** `/settings/users` — the tenant user list (§10.6). */
 export function UserList() {
   const me = useMe();
-  const [page, setPage] = useState(1);
+  const { page, pageSize, setPage, setPageSize, key } = usePagination();
   const [search, setSearch] = useState("");
 
-  const { state, reload } = useAsync(`users:${page}:${search}`, () =>
-    listTenantUsers({ page, q: search, sort: "fullName" }),
+  const { state, reload } = useAsync(`users:${key}:${search}`, () =>
+    listTenantUsers({ page, pageSize, q: search, sort: "fullName" }),
   );
 
   // Only modules this tenant is entitled to have a column at all: a level in a
@@ -93,25 +97,23 @@ export function UserList() {
 
   return (
     <AppShell title="Users" actions={newUser}>
-      <label className="mb-4 block max-w-sm">
-        <span className="mb-1 block text-sm text-secondary">Search</span>
-        <input
-          type="search"
+      <FilterBar>
+        <SearchInput
+          label="Search users"
           value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
+          onChange={(next) => {
+            setSearch(next);
             setPage(1);
           }}
           placeholder="Name or email"
-          className="min-h-11 w-full rounded-md border border-hairline bg-surface px-3 text-sm"
         />
-      </label>
+      </FilterBar>
 
       {state.status === "error" ? (
         <ErrorNotice error={state.error} onRetry={reload} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+          <TableFrame>
             <table className="w-full min-w-[38rem] text-left text-sm">
               <TableHead
                 columns={[
@@ -137,10 +139,7 @@ export function UserList() {
               {state.status === "ready" && state.data.data.length > 0 && (
                 <tbody>
                   {state.data.data.map((user) => (
-                    <tr
-                      key={user.id}
-                      className="border-t border-hairline hover:bg-raised"
-                    >
+                    <tr key={user.id} className={tableRow}>
                       <td className="px-3 py-3">
                         <Link
                           to={`/settings/users/${user.id}`}
@@ -182,7 +181,7 @@ export function UserList() {
                 </tbody>
               )}
             </table>
-          </div>
+          </TableFrame>
 
           {state.status === "ready" && (
             <Pagination
@@ -191,6 +190,7 @@ export function UserList() {
               totalItems={state.data.totalItems}
               totalPages={state.data.totalPages}
               onPage={setPage}
+              onPageSize={setPageSize}
             />
           )}
         </>

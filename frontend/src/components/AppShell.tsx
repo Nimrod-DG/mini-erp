@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 
-import { useAuth, useMe } from "../hooks/useAuth";
+import { useMe } from "../hooks/useAuth";
 import type { Me, ModuleCode } from "../lib/api";
 import { ThemeToggle } from "./ThemeToggle";
+import { UserMenu } from "./UserMenu";
 
 /** Written out rather than built from a template string: Tailwind scans source
  *  text, so a class it cannot see literally is a class it does not generate. */
@@ -155,27 +156,6 @@ function BottomTabs({ me }: { me: Me }) {
   );
 }
 
-/** RoleBadges renders the per-module levels the top bar carries (§10.1). */
-function RoleBadges({ me }: { me: Me }) {
-  const held = MODULES.filter((m) => me.moduleRoles[m.code]);
-  if (held.length === 0) return null;
-
-  return (
-    <ul className="hidden items-center gap-1.5 sm:flex">
-      {held.map((module) => (
-        <li
-          key={module.code}
-          className="rounded border border-hairline px-2 py-0.5 text-xs text-secondary"
-          title={`${module.label}: ${me.moduleRoles[module.code]}`}
-        >
-          {module.label.slice(0, 4)}
-          <span className="ml-1 tabular">{me.moduleRoles[module.code]}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /** `/inventory/products` -> `/inventory`, so every screen in the module keeps
  *  the module's sub-navigation open. */
 function modulePrefix(path: string): string {
@@ -187,8 +167,12 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
   const base =
     "flex min-h-11 items-center rounded-md px-3 text-sm transition-colors";
   return isActive
-    ? `${base} bg-raised font-medium text-primary`
-    : `${base} text-secondary hover:bg-raised hover:text-primary`;
+    // bg-subtle, not bg-raised: the desktop sidebar sits on `canvas` and the
+    // mobile drawer is `surface`, and `raised` is white against both in light
+    // mode — so the fill that marks where you are marked nothing, and the
+    // hover was invisible outright.
+    ? `${base} bg-subtle font-medium text-primary`
+    : `${base} text-secondary hover:bg-subtle hover:text-primary`;
 }
 
 /**
@@ -210,7 +194,6 @@ export function AppShell({
   children: ReactNode;
 }) {
   const me = useMe();
-  const { signOut } = useAuth();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -259,43 +242,55 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-canvas text-primary">
-      <header className="sticky top-0 z-30 flex flex-wrap items-center gap-3 border-b border-hairline bg-canvas px-4 py-3">
+      {/* One row, and it stays one row at 360px — `flex-wrap` used to let the
+          identity cluster fall onto a second line, which pushed every screen
+          down by 44px on a phone. What made that possible was moving the name,
+          the role badges and Sign out into `UserMenu`. */}
+      <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-hairline bg-canvas px-4 py-3">
         <button
           type="button"
           aria-label="Open navigation"
           aria-expanded={drawerOpen}
           onClick={() => setDrawerOpen((open) => !open)}
-          className="grid size-11 place-items-center rounded-md border border-hairline lg:hidden"
+          className="grid size-11 shrink-0 place-items-center rounded-xl border border-hairline transition-colors hover:bg-subtle lg:hidden"
         >
-          <span aria-hidden="true">☰</span>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            className="size-[18px]"
+          >
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
         </button>
 
-        <Link to={items[0]?.to ?? "/"} className="text-base font-semibold">
+        <Link
+          to={items[0]?.to ?? "/"}
+          className="shrink-0 text-base font-semibold"
+        >
           mini-erp
         </Link>
 
+        {/* The workspace name is context, not identity: it says which set of
+            books you are looking at, and it is the one thing here that changes
+            what every screen below means. It stays on the bar. */}
         {me.tenant && (
-          <span className="text-sm text-secondary">{me.tenant.name}</span>
+          <span className="truncate text-sm text-secondary max-sm:sr-only">
+            {me.tenant.name}
+          </span>
         )}
         {me.user.tenantRole === "superadmin" && (
-          <span className="rounded border border-hairline px-2 py-0.5 text-xs text-secondary">
+          <span className="shrink-0 rounded-full border border-hairline px-2 py-0.5 text-xs text-secondary">
             platform
           </span>
         )}
 
-        <div className="flex min-w-0 w-full flex-wrap items-center gap-3 sm:ml-auto sm:w-auto sm:flex-nowrap">
-          <RoleBadges me={me} />
-          <span className="hidden text-sm text-secondary md:inline">
-            {me.user.fullName}
-          </span>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <ThemeToggle />
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="min-h-11 rounded-md border border-hairline px-3 text-sm"
-          >
-            Sign out
-          </button>
+          <UserMenu />
         </div>
       </header>
 

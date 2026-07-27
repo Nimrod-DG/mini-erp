@@ -35,6 +35,13 @@ function emptyRequisitions() {
   );
 }
 
+/** Narrow the list by status. Two presses now rather than one — the row of chips
+ *  became a dropdown when the filter row had to share a line with a search box. */
+async function chooseStatus(label: string) {
+  await userEvent.click(screen.getByRole("combobox", { name: "Status" }));
+  await userEvent.click(screen.getByRole("option", { name: label }));
+}
+
 describe("FE14 — first-run and no-results are different copy and different actions", () => {
   it("explains what a requisition is for when there are none at all", async () => {
     emptyRequisitions();
@@ -72,7 +79,7 @@ describe("FE14 — first-run and no-results are different copy and different act
     await renderApp("/procurement/requisitions", sari);
     await screen.findByText(FIRST_RUN);
 
-    await userEvent.click(screen.getByRole("button", { name: "Draft" }));
+    await chooseStatus("Draft");
 
     // Different words, because it is a different problem: nothing is missing, the
     // question was too narrow.
@@ -82,7 +89,14 @@ describe("FE14 — first-run and no-results are different copy and different act
     // question the reader just asked. Clearing the filter would.
     const table = screen.getByRole("table");
     expect(within(table).queryByRole("link", { name: "New requisition" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "All" })).toBeInTheDocument();
+
+    // The way back. It was an "All" chip beside the others; it is now the
+    // dropdown's first row, and the trigger says which narrowing is in force so
+    // the reader can see what to undo.
+    const filter = screen.getByRole("combobox", { name: "Status" });
+    expect(filter).toHaveTextContent("Draft");
+    await userEvent.click(filter);
+    expect(screen.getByRole("option", { name: "All statuses" })).toBeInTheDocument();
   });
 
   it("tells the two apart on a search as well as on a filter chip", async () => {
@@ -106,7 +120,7 @@ describe("FE14 — first-run and no-results are different copy and different act
     expect(await screen.findByText(FIRST_RUN)).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Submitted" }));
+    await chooseStatus("Submitted");
     expect(await screen.findByText(NO_RESULTS)).toBeInTheDocument();
   });
 

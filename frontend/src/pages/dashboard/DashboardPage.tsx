@@ -1,14 +1,13 @@
+import type { ReactNode } from "react";
+
 import { AppShell } from "../../components/AppShell";
 import { ErrorNotice } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
-import { getDashboardSummary } from "../../lib/api";
-import { formatMoney } from "../../lib/format";
-import { holds } from "../../lib/levels";
-import { ApprovalQueue } from "./ApprovalQueue";
-import { LowStockCard } from "./LowStockCard";
-import { RecentActivityCard } from "./RecentActivityCard";
-import { WidgetCard, WidgetEmpty, WidgetFigure } from "./WidgetCard";
+import { getDashboardSummary, type DashboardSummary } from "../../lib/api";
+import { formatMoney, formatQty } from "../../lib/format";
+import { ActivityTable } from "./ActivityTable";
+import { StatTile } from "./StatTile";
 
 /**
  * `/` — the dashboard of §10.2, in one request.
@@ -21,9 +20,43 @@ import { WidgetCard, WidgetEmpty, WidgetFigure } from "./WidgetCard";
  * the data would already be in the payload. Filtering server-side is what makes
  * the omission real rather than decorative.
  *
- * The one thing decided here is the *shortcut* on the low-stock widget, which
- * crosses modules: seeing that stock is low is Inventory, asking for more of it
- * is Procurement, and plenty of people can do one and not the other.
+ * ------------------------------------------------------------------------
+ * THE LAYOUT: THREE NUMBERS AND ONE TABLE. NOTHING ELSE.
+ *
+ * It was four cards in two columns, each leading with its own figure. Then it was
+ * a stat strip over an approval queue over two side-by-side panels. This is the
+ * third arrangement and the first that is not fighting itself, because it stopped
+ * saying anything twice:
+ *
+ *   - **The approval queue was the "Awaiting approval" tile again**, with a list
+ *     under it. Both went to the same place; one of them was a whole panel.
+ *   - **The Low stock panel was the "Below reorder point" tile again**, with the
+ *     same rows the tile's destination shows.
+ *   - **The activity feed was a narrow column several times taller than anything
+ *     beside it**, which is what made every version of this page look lopsided.
+ *
+ * So: the tiles are the summary, each tile is the way in to its own screen, and
+ * the one thing that is genuinely *only* here — the last fifteen movements — gets
+ * the full width and becomes a table like every other list in the application.
+ *
+ *   [ three tiles ]      the summary, one row, one baseline
+ *   [ recent activity ]  full width, with the standard filter row
+ *
+ * WHAT THIS GAVE UP, RECORDED HONESTLY. §10.7.1 asks for requisition approval as
+ * "a two-button decision between meetings", and the queue panel was that. It is
+ * gone, so approving now means opening the requisition. That was the owner's call
+ * against the duplication, and it is the one thing to reverse first if the
+ * two-button decision turns out to matter more than the tidiness — see
+ * `PROGRESS.md`.
+ *
+ * The low-stock panel's "Create requisition" shortcut was *not* given up: it moved
+ * to `/inventory/stock`, which is where the tile now points and where somebody
+ * looking at low stock already is.
+ *
+ * THE TILE ORDER IS DELIBERATE AND FIXED: what needs a decision, then what is at
+ * risk, then what is in flight. Urgency descending, and stable no matter which
+ * subset of tiles a given identity gets — a strip whose order depends on your
+ * entitlements is a strip you have to read rather than recognise.
  */
 export function DashboardPage() {
   const me = useMe();
@@ -39,16 +72,7 @@ export function DashboardPage() {
   if (state.status === "loading") {
     return (
       <AppShell title="Dashboard">
-        {/* Skeletons at the real card height, so nothing lurches when the data
-            lands (§10.7.6). */}
-        <div className="grid gap-4 lg:grid-cols-2">
-          {[0, 1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-48 animate-pulse rounded-lg border border-hairline bg-surface"
-            />
-          ))}
-        </div>
+        <DashboardSkeleton />
       </AppShell>
     );
   }
@@ -65,76 +89,114 @@ export function DashboardPage() {
       {nothing ? (
         <EmptyDashboard superadmin={me.user.tenantRole === "superadmin"} />
       ) : (
-        // One column on a phone, two from `lg`. Not three: the approval queue and
-        // the activity feed are both tall, and a third column would make every
-        // card narrow enough that the queue's two buttons stack.
-        //
-        // The two columns are independent flex stacks rather than four cards in a
-        // `grid-cols-2`, because a grid aligns rows: the queue and the activity
-        // feed are several times taller than the two figure cards beside them, so
-        // every short card left a row-height hole underneath it. `items-start`
-        // stops the card *stretching* but cannot reclaim the row's height — only
-        // separate columns can, and masonry is not yet something to ship.
-        //
-        // The cost is that the phone order becomes column-major: open orders, low
-        // stock, then the queue. Interleaving on a phone *and* packing on a desktop
-        // cannot both come out of one DOM order.
-        <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:items-start">
-          <div className="flex flex-col gap-4">
-            {summary.openOrders && (
-              <WidgetCard
-                title="Open purchase orders"
-                href="/procurement/orders"
-              >
-                <WidgetFigure
-                  value={String(summary.openOrders.count)}
-                  caption={
-                    summary.openOrders.count === 1
-                      ? "order still expecting goods"
-                      : "orders still expecting goods"
-                  }
-                />
-                {summary.openOrders.count === 0 ? (
-                  <WidgetEmpty>Nothing is on order.</WidgetEmpty>
-                ) : (
-                  <p className="mt-4 text-sm text-secondary">
-                    Worth{" "}
-                    <span className="tabular text-primary">
-                      {formatMoney(summary.openOrders.totalValue)}
-                    </span>{" "}
-                    in total.
-                  </p>
-                )}
-              </WidgetCard>
-            )}
+        <div className="space-y-8">
+          <StatStrip summary={summary} />
 
-            {summary.lowStock && (
-              <LowStockCard
-                widget={summary.lowStock}
-                canRaise={holds(me.moduleRoles, "procurement", "user")}
-              />
-            )}
-          </div>
-
-          <div className="flex flex-col gap-4">
-            {summary.pendingApprovals && (
-              <ApprovalQueue
-                widget={summary.pendingApprovals}
-                meId={me.user.id}
-                onDecided={reload}
-              />
-            )}
-
-            {summary.recentActivity && me.tenant && (
-              <RecentActivityCard
-                widget={summary.recentActivity}
-                timezone={me.tenant.timezone}
-              />
-            )}
-          </div>
+          {summary.recentActivity && me.tenant && (
+            <ActivityTable
+              widget={summary.recentActivity}
+              timezone={me.tenant.timezone}
+            />
+          )}
         </div>
       )}
     </AppShell>
+  );
+}
+
+/** The headline numbers, in fixed urgency order. */
+function StatStrip({ summary }: { summary: DashboardSummary }) {
+  const tiles: ReactNode[] = [];
+
+  if (summary.pendingApprovals) {
+    const { count, canApprove } = summary.pendingApprovals;
+    tiles.push(
+      <StatTile
+        key="approvals"
+        label="Awaiting approval"
+        value={count}
+        // Three different sentences for three different situations, because
+        // "3 requisitions waiting" tells an approver nothing they did not
+        // already know from the number.
+        detail={
+          count === 0
+            ? "Nothing waiting on a decision"
+            : canApprove
+              ? count === 1
+                ? "1 requisition needs you"
+                : `${count} requisitions need you`
+              : "An approver decides these"
+        }
+        href="/procurement/requisitions?status=submitted"
+        attention={count > 0 && canApprove}
+      />,
+    );
+  }
+
+  if (summary.lowStock) {
+    const { count, products } = summary.lowStock;
+    const worst = products[0];
+    tiles.push(
+      <StatTile
+        key="low-stock"
+        label="Below reorder point"
+        value={count}
+        // The worst one by name. "3 products are low" is the number again in
+        // words; "PKG-BOX-S is short 60 pcs" is the thing to do something about.
+        detail={
+          worst
+            ? `${worst.sku} short ${formatQty(worst.shortfall)} ${worst.uom}`
+            : "Everything is above its reorder point"
+        }
+        href="/inventory/stock"
+        attention={count > 0}
+      />,
+    );
+  }
+
+  if (summary.openOrders) {
+    const { count, totalValue } = summary.openOrders;
+    tiles.push(
+      <StatTile
+        key="open-orders"
+        label="Open purchase orders"
+        value={count}
+        detail={
+          count === 0
+            ? "Nothing is on order"
+            : `Worth ${formatMoney(totalValue)}`
+        }
+        href="/procurement/orders"
+      />,
+    );
+  }
+
+  if (tiles.length === 0) return null;
+  return (
+    <ul
+      aria-label="Summary"
+      className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+    >
+      {tiles}
+    </ul>
+  );
+}
+
+/** Skeletons in the shape of the real thing, so nothing lurches when the data
+ *  lands (§10.7.6) — a strip of tiles over one wide table. */
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-8">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="h-28 animate-pulse rounded-xl border border-hairline bg-surface"
+          />
+        ))}
+      </div>
+      <div className="h-96 animate-pulse rounded-xl border border-hairline bg-surface" />
+    </div>
   );
 }
 
@@ -148,7 +210,7 @@ export function DashboardPage() {
  */
 function EmptyDashboard({ superadmin }: { superadmin: boolean }) {
   return (
-    <div className="max-w-xl rounded-lg border border-hairline bg-surface p-6">
+    <div className="max-w-xl rounded-xl border border-hairline bg-surface p-6">
       <p className="text-sm text-secondary">
         {superadmin
           ? "You administer workspaces rather than working inside one, so there is nothing here to count. Open Workspaces to manage tenants and their modules."

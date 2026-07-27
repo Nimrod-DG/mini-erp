@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
+import { FilterBar, FilterDropdown, SearchInput } from "../../components/Filters";
 import {
   EmptyState,
   ErrorNotice,
@@ -10,10 +11,14 @@ import {
   ScrollableTable,
   SkeletonRows,
   TableHead,
+  tableRow,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
+import { useMe } from "../../hooks/useAuth";
+import { usePagination } from "../../hooks/usePagination";
 import { listLowStock, listStock, listWarehouses } from "../../lib/api";
 import { formatQty } from "../../lib/format";
+import { holds } from "../../lib/levels";
 
 const COLUMNS = 3;
 
@@ -26,7 +31,7 @@ const COLUMNS = 3;
  * an answer, and hiding it would make this screen disagree with the ledger.
  */
 export function StockGrid() {
-  const [page, setPage] = useState(1);
+  const { page, pageSize, setPage, setPageSize, key } = usePagination();
   const [search, setSearch] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
 
@@ -35,10 +40,11 @@ export function StockGrid() {
   );
 
   const { state, reload } = useAsync(
-    `stock:${page}:${search}:${warehouseId}`,
+    `stock:${key}:${search}:${warehouseId}`,
     () =>
       listStock({
         page,
+        pageSize,
         q: search,
         warehouseId: warehouseId || undefined,
         sort: "sku",
@@ -51,41 +57,34 @@ export function StockGrid() {
     <AppShell title="Stock on hand">
       <LowStockBanner />
 
-      <div className="mb-4 flex flex-wrap items-end gap-4">
-        <label className="block max-w-sm grow">
-          <span className="mb-1 block text-sm text-secondary">Search</span>
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder="SKU, product, or warehouse"
-            className="min-h-11 w-full rounded-md border border-hairline bg-surface px-3 text-sm"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-sm text-secondary">Warehouse</span>
-          <select
-            value={warehouseId}
-            onChange={(event) => {
-              setWarehouseId(event.target.value);
-              setPage(1);
-            }}
-            className="min-h-11 rounded-md border border-hairline bg-surface px-3 text-sm"
-          >
-            <option value="">All warehouses</option>
-            {warehouses.state.status === "ready" &&
-              warehouses.state.data.data.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.code} — {warehouse.name}
-                </option>
-              ))}
-          </select>
-        </label>
-      </div>
+      <FilterBar>
+        <SearchInput
+          label="Search stock"
+          value={search}
+          onChange={(next) => {
+            setSearch(next);
+            setPage(1);
+          }}
+          placeholder="SKU, product, or warehouse"
+        />
+        <FilterDropdown
+          label="Warehouse"
+          value={warehouseId}
+          allLabel="All warehouses"
+          options={
+            warehouses.state.status === "ready"
+              ? warehouses.state.data.data.map((warehouse) => ({
+                  value: warehouse.id,
+                  label: `${warehouse.code} — ${warehouse.name}`,
+                }))
+              : []
+          }
+          onChange={(next) => {
+            setWarehouseId(next);
+            setPage(1);
+          }}
+        />
+      </FilterBar>
 
       {state.status === "error" ? (
         <ErrorNotice error={state.error} onRetry={reload} />
@@ -127,7 +126,7 @@ export function StockGrid() {
                   {state.data.data.map((cell) => (
                     <tr
                       key={`${cell.productId}:${cell.warehouseId}`}
-                      className="group border-t border-hairline hover:bg-raised"
+                      className={`group ${tableRow}`}
                     >
                       <td className={`px-3 py-3 align-top ${frozenCell}`}>
                         <Link
@@ -169,6 +168,7 @@ export function StockGrid() {
               totalItems={state.data.totalItems}
               totalPages={state.data.totalPages}
               onPage={setPage}
+              onPageSize={setPageSize}
             />
           )}
         </>
@@ -183,16 +183,41 @@ export function StockGrid() {
  *
  * Silent when nothing is low: a banner that is always present stops being read,
  * and this one exists to be noticed.
+ *
+ * THE SHORTCUT MOVED HERE FROM THE DASHBOARD. It used to hang off the dashboard's
+ * Low stock panel, which was removed as a duplicate of the "Below reorder point"
+ * tile — but the shortcut is not a duplicate of anything, and it is the reason
+ * the panel was worth having. A count of low products tells somebody there is a
+ * problem; "Create requisition" is the thing they were going to do about it, with
+ * the products and their shortfalls already on it. This is where the tile now
+ * points, and where somebody looking at low stock already is, so it is arguably
+ * where it always belonged.
  */
 function LowStockBanner() {
+  const me = useMe();
   const { state } = useAsync("low-stock", () =>
     listLowStock({ pageSize: 5, sort: "-shortfall" }),
   );
 
   if (state.status !== "ready" || state.data.totalItems === 0) return null;
 
+  // Cross-module and cosmetic (I12): seeing that stock is low is Inventory,
+  // asking for more of it is Procurement, and plenty of people can do one and
+  // not the other — Budi in the seed is `viewer` in Inventory and `approver` in
+  // Procurement, and Dewi is the other way round.
+  const canRaise = holds(me.moduleRoles, "procurement", "user");
+
+  // `<id>:<qty>` per product. The quantity is the shortfall the server computed,
+  // so the shortcut produces a requisition that would actually clear the reorder
+  // point rather than one for a single unit of something short by forty.
+  // `String()` rather than formatQty: this lands in a numeric input, and a
+  // thousands separator would make it unparseable.
+  const prefill = state.data.data
+    .map((row) => `${row.productId}:${String(row.shortfall)}`)
+    .join(",");
+
   return (
-    <section className="mb-6 rounded-lg border border-warning/40 bg-surface p-4">
+    <section className="mb-6 rounded-xl border border-warning/40 bg-surface p-4">
       <h2 className="text-sm font-semibold text-warning">
         {state.data.totalItems === 1
           ? "1 product is below its reorder point"
@@ -221,6 +246,15 @@ function LowStockBanner() {
         <p className="mt-2 text-xs text-secondary">
           Showing the {state.data.data.length} largest shortfalls.
         </p>
+      )}
+
+      {canRaise && (
+        <Link
+          to={`/procurement/requisitions/new?products=${prefill}`}
+          className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-hairline px-4 text-sm transition-colors hover:bg-subtle"
+        >
+          Create requisition
+        </Link>
       )}
     </section>
   );

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
+import { FilterBar, FilterDropdown, SearchInput } from "../../components/Filters";
 import {
   EmptyState,
   ErrorNotice,
@@ -11,9 +12,11 @@ import {
   SkeletonRows,
   SourceFilterNotice,
   TableHead,
+  tableRow,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
+import { usePagination } from "../../hooks/usePagination";
 import {
   listLedger,
   listWarehouses,
@@ -24,15 +27,16 @@ import { formatDateTime, formatDelta, formatMoney } from "../../lib/format";
 
 const COLUMNS = 5;
 
-const ENTRY_TYPES: { value: EntryType | ""; label: string }[] = [
-  { value: "", label: "All movements" },
+// The "all" row is not here: `FilterDropdown` owns it, so that every filter on
+// every screen spells the unfiltered case the same way and puts it in the same
+// place.
+const ENTRY_TYPES: { value: EntryType; label: string }[] = [
   { value: "receipt", label: "Receipts" },
   { value: "issue", label: "Issues" },
   { value: "adjustment", label: "Adjustments" },
 ];
 
-const SOURCE_TYPES: { value: SourceType | ""; label: string }[] = [
-  { value: "", label: "All sources" },
+const SOURCE_TYPES: { value: SourceType; label: string }[] = [
   { value: "goods_receipt", label: "Goods receipts" },
   { value: "manual_adjustment", label: "Manual adjustments" },
 ];
@@ -53,7 +57,7 @@ export function LedgerPage() {
   const me = useMe();
   const timezone = me.tenant?.timezone ?? "UTC";
 
-  const [page, setPage] = useState(1);
+  const { page, pageSize, setPage, setPageSize, key } = usePagination();
   const [search, setSearch] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
   const [entryType, setEntryType] = useState<EntryType | "">("");
@@ -72,10 +76,11 @@ export function LedgerPage() {
   );
 
   const { state, reload } = useAsync(
-    `ledger:${page}:${search}:${warehouseId}:${entryType}:${sourceType}:${sourceId}`,
+    `ledger:${key}:${search}:${warehouseId}:${entryType}:${sourceType}:${sourceId}`,
     () =>
       listLedger({
         page,
+        pageSize,
         q: search,
         warehouseId: warehouseId || undefined,
         entryType,
@@ -92,82 +97,56 @@ export function LedgerPage() {
     sourceType !== "" ||
     sourceId !== "";
 
-  const select =
-    "min-h-11 rounded-md border border-hairline bg-surface px-3 text-sm";
-
   return (
     <AppShell title="Stock ledger">
-      <div className="mb-4 flex flex-wrap items-end gap-4">
-        <label className="block max-w-xs grow">
-          <span className="mb-1 block text-sm text-secondary">Search</span>
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder="SKU, product, or note"
-            className={`${select} w-full`}
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-sm text-secondary">Warehouse</span>
-          <select
-            value={warehouseId}
-            onChange={(event) => {
-              setWarehouseId(event.target.value);
-              setPage(1);
-            }}
-            className={select}
-          >
-            <option value="">All warehouses</option>
-            {warehouses.state.status === "ready" &&
-              warehouses.state.data.data.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.code}
-                </option>
-              ))}
-          </select>
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-sm text-secondary">Movement</span>
-          <select
-            value={entryType}
-            onChange={(event) => {
-              setEntryType(event.target.value as EntryType | "");
-              setPage(1);
-            }}
-            className={select}
-          >
-            {ENTRY_TYPES.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-sm text-secondary">Source</span>
-          <select
-            value={sourceType}
-            onChange={(event) => {
-              setSourceType(event.target.value as SourceType | "");
-              setPage(1);
-            }}
-            className={select}
-          >
-            {SOURCE_TYPES.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <FilterBar>
+        <SearchInput
+          label="Search the ledger"
+          value={search}
+          onChange={(next) => {
+            setSearch(next);
+            setPage(1);
+          }}
+          placeholder="SKU, product, or note"
+        />
+        <FilterDropdown
+          label="Warehouse"
+          value={warehouseId}
+          allLabel="All warehouses"
+          options={
+            warehouses.state.status === "ready"
+              ? warehouses.state.data.data.map((warehouse) => ({
+                  value: warehouse.id,
+                  label: `${warehouse.code} — ${warehouse.name}`,
+                }))
+              : []
+          }
+          onChange={(next) => {
+            setWarehouseId(next);
+            setPage(1);
+          }}
+        />
+        <FilterDropdown
+          label="Movement"
+          value={entryType}
+          allLabel="All movements"
+          options={ENTRY_TYPES}
+          onChange={(next) => {
+            setEntryType(next as EntryType | "");
+            setPage(1);
+          }}
+        />
+        <FilterDropdown
+          label="Source"
+          value={sourceType}
+          allLabel="All sources"
+          options={SOURCE_TYPES}
+          onChange={(next) => {
+            setSourceType(next as SourceType | "");
+            setPage(1);
+          }}
+        />
+      </FilterBar>
 
       <SourceFilterNotice
         showing="the movements from one document"
@@ -215,7 +194,7 @@ export function LedgerPage() {
                   {state.data.data.map((entry) => (
                     <tr
                       key={entry.id}
-                      className="group border-t border-hairline hover:bg-raised"
+                      className={`group ${tableRow}`}
                     >
                       <td className={`px-3 py-3 text-secondary ${frozenCell}`}>
                         {formatDateTime(entry.occurredAt, timezone)}
@@ -279,6 +258,7 @@ export function LedgerPage() {
               totalItems={state.data.totalItems}
               totalPages={state.data.totalPages}
               onPage={setPage}
+              onPageSize={setPageSize}
             />
           )}
         </>

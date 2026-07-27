@@ -9,6 +9,7 @@ import {
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableFrame,
   TableHead,
   type Column,
 } from "./ListStates";
@@ -41,6 +42,7 @@ export function ResponsiveList<T extends { id: string }>({
   state,
   onRetry,
   onPage,
+  onPageSize,
   columns,
   minWidth,
   filtered,
@@ -53,6 +55,8 @@ export function ResponsiveList<T extends { id: string }>({
   state: AsyncState<ListResponse<T>>;
   onRetry: () => void;
   onPage: (page: number) => void;
+  /** Omit to render the list without a page-size picker. */
+  onPageSize?: (pageSize: number) => void;
 
   columns: Column[];
   /** The table's minimum width, as a literal Tailwind class — the width below
@@ -100,7 +104,7 @@ export function ResponsiveList<T extends { id: string }>({
           {rows.length > 0 && <CardList>{rows.map(card)}</CardList>}
         </>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+        <TableFrame>
           <table className={`w-full ${minWidth} text-left text-sm`}>
             <TableHead columns={columns} />
             {state.status === "loading" && <SkeletonRows cols={columns.length} />}
@@ -115,7 +119,7 @@ export function ResponsiveList<T extends { id: string }>({
             )}
             {rows.length > 0 && <tbody>{rows.map(row)}</tbody>}
           </table>
-        </div>
+        </TableFrame>
       )}
 
       {state.status === "ready" && (
@@ -125,6 +129,7 @@ export function ResponsiveList<T extends { id: string }>({
           totalItems={state.data.totalItems}
           totalPages={state.data.totalPages}
           onPage={onPage}
+          onPageSize={onPageSize}
         />
       )}
     </>

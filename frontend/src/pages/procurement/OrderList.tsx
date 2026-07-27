@@ -3,15 +3,18 @@ import { Link } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
 import { DocumentCard } from "../../components/CardList";
+import { FilterBar, FilterDropdown, SearchInput } from "../../components/Filters";
+import { tableRow } from "../../components/ListStates";
 import { ResponsiveList } from "../../components/ResponsiveList";
-import { StatusChip, StatusFilter } from "../../components/StatusChip";
+import { StatusChip } from "../../components/StatusChip";
 import { useAsync } from "../../hooks/useAsync";
+import { usePagination } from "../../hooks/usePagination";
 import {
   listPurchaseOrders,
   listSuppliers,
   type PurchaseOrderStatus,
 } from "../../lib/api";
-import { formatMoney, formatQty } from "../../lib/format";
+import { formatMoney, formatQty, statusLabel } from "../../lib/format";
 
 const STATUSES: readonly PurchaseOrderStatus[] = [
   "open",
@@ -19,6 +22,11 @@ const STATUSES: readonly PurchaseOrderStatus[] = [
   "received",
   "cancelled",
 ];
+
+const STATUS_OPTIONS = STATUSES.map((status) => ({
+  value: status,
+  label: statusLabel(status),
+}));
 
 /**
  * `/procurement/orders` — the PO list with the §10.3 status and supplier filters.
@@ -32,16 +40,17 @@ const STATUSES: readonly PurchaseOrderStatus[] = [
  * (§10.7.1, §10.7.4).
  */
 export function OrderList() {
-  const [page, setPage] = useState(1);
+  const { page, pageSize, setPage, setPageSize, key } = usePagination();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<PurchaseOrderStatus | "">("");
   const [supplierId, setSupplierId] = useState("");
 
   const { state, reload } = useAsync(
-    `orders:${page}:${search}:${status}:${supplierId}`,
+    `orders:${key}:${search}:${status}:${supplierId}`,
     () =>
       listPurchaseOrders({
         page,
+        pageSize,
         q: search,
         status,
         supplierId: supplierId || undefined,
@@ -71,57 +80,50 @@ export function OrderList() {
 
   return (
     <AppShell title="Purchase orders">
-      <div className="mb-4 space-y-4">
-        <StatusFilter
-          value={status}
-          options={STATUSES}
+      <FilterBar>
+        <SearchInput
+          label="Search purchase orders"
+          value={search}
           onChange={(next) => {
-            setStatus(next);
+            setSearch(next);
+            setPage(1);
+          }}
+          placeholder="Order number or supplier"
+        />
+        <FilterDropdown
+          label="Status"
+          value={status}
+          options={STATUS_OPTIONS}
+          allLabel="All statuses"
+          onChange={(next) => {
+            setStatus(next as PurchaseOrderStatus | "");
             setPage(1);
           }}
         />
-
-        <div className="flex flex-wrap items-end gap-4">
-          <label className="block max-w-sm grow">
-            <span className="mb-1 block text-sm text-secondary">Search</span>
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Order number or supplier"
-              className="min-h-11 w-full rounded-md border border-hairline bg-surface px-3 text-sm"
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-sm text-secondary">Supplier</span>
-            <select
-              value={supplierId}
-              onChange={(event) => {
-                setSupplierId(event.target.value);
-                setPage(1);
-              }}
-              className="min-h-11 rounded-md border border-hairline bg-surface px-3 text-sm"
-            >
-              <option value="">All suppliers</option>
-              {suppliers.status === "ready" &&
-                suppliers.data.data.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.code} — {supplier.name}
-                  </option>
-                ))}
-            </select>
-          </label>
-        </div>
-      </div>
+        <FilterDropdown
+          label="Supplier"
+          value={supplierId}
+          allLabel="All suppliers"
+          options={
+            suppliers.status === "ready"
+              ? suppliers.data.data.map((supplier) => ({
+                  value: supplier.id,
+                  label: `${supplier.code} — ${supplier.name}`,
+                }))
+              : []
+          }
+          onChange={(next) => {
+            setSupplierId(next);
+            setPage(1);
+          }}
+        />
+      </FilterBar>
 
       <ResponsiveList
         state={state}
         onRetry={reload}
         onPage={setPage}
+        onPageSize={setPageSize}
         minWidth="min-w-[52rem]"
         filtered={search !== "" || status !== "" || supplierId !== ""}
         firstRun="No purchase orders yet. They are not created by hand — approving a requisition creates one."
@@ -135,7 +137,7 @@ export function OrderList() {
           { label: "Total", align: "right" },
         ]}
         row={(row) => (
-          <tr key={row.id} className="border-t border-hairline hover:bg-raised">
+          <tr key={row.id} className={tableRow}>
             <td className="px-3 py-3">
               <Link
                 to={`/procurement/orders/${row.id}`}

@@ -746,12 +746,19 @@ export type RequisitionWrite = {
   lines?: RequisitionLineWrite[];
 };
 
-export type RequisitionQuery = ListQuery & { status?: RequisitionStatus | "" };
+export type RequisitionQuery = ListQuery & {
+  status?: RequisitionStatus | "";
+  /** Narrows to one supplier. A requisition's supplier is nullable until
+   *  approval (§8.3), so this necessarily excludes drafts that have not chosen
+   *  one — which is what "what are we buying from Acme" means. */
+  supplierId?: string;
+};
 
 export function listRequisitions(query: RequisitionQuery = {}) {
   return apiFetch<ListResponse<Requisition>>(
     `/api/procurement/requisitions${queryString(query, {
       status: query.status || undefined,
+      supplierId: query.supplierId || undefined,
     })}`,
   );
 }

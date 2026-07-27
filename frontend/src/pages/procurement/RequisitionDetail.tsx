@@ -328,7 +328,7 @@ function Summary({ pr }: { pr: Detail }) {
 /** What was asked for. Every total on it was computed by PostgreSQL (I8). */
 function LinesTable({ pr }: { pr: Detail }) {
   return (
-    <section className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+    <section className="overflow-x-auto rounded-xl border border-hairline bg-surface">
       <table className="w-full min-w-[36rem] text-left text-sm">
         <caption className="px-3 pt-3 text-left text-sm font-medium">
           Lines

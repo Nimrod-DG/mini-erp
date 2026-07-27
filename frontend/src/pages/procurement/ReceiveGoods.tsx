@@ -197,7 +197,7 @@ function ReceiveForm({
     >
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-6">
-          <section className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+          <section className="overflow-x-auto rounded-xl border border-hairline bg-surface">
             <table className="w-full min-w-[40rem] text-left text-sm">
               <caption className="px-3 pt-3 text-left text-sm font-medium">
                 What arrived
@@ -425,7 +425,7 @@ function ReceiptConfirmation({ result }: { result: ReceiptResult }) {
         )}
       </section>
 
-      <section className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+      <section className="overflow-x-auto rounded-xl border border-hairline bg-surface">
         <table className="w-full min-w-[36rem] text-left text-sm">
           <caption className="px-3 pt-3 text-left text-sm font-medium">
             Received

@@ -165,7 +165,7 @@ export function TenantNew() {
           </p>
 
           {catalogue.status === "loading" && (
-            <div className="h-24 animate-pulse rounded bg-raised" />
+            <div className="h-24 animate-pulse rounded bg-subtle" />
           )}
           {catalogue.status === "error" && (
             <ErrorNotice error={catalogue.error} />

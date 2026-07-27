@@ -331,7 +331,7 @@ function OrderSummary({
  */
 function OrderLines({ lines }: { lines: PurchaseOrderLine[] }) {
   return (
-    <section className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+    <section className="overflow-x-auto rounded-xl border border-hairline bg-surface">
       <table className="w-full min-w-[44rem] text-left text-sm">
         <caption className="px-3 pt-3 text-left text-sm font-medium">
           Lines
@@ -421,7 +421,7 @@ function ReceiptHistory({
   }
 
   return (
-    <section className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+    <section className="overflow-x-auto rounded-xl border border-hairline bg-surface">
       <table className="w-full min-w-[36rem] text-left text-sm">
         <caption className="px-3 pt-3 text-left text-sm font-medium">
           Receipts

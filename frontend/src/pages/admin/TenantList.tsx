@@ -2,14 +2,18 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
+import { FilterBar, SearchInput } from "../../components/Filters";
 import {
   EmptyState,
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableFrame,
   TableHead,
+  tableRow,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
+import { usePagination } from "../../hooks/usePagination";
 import { listTenants, type TenantSummary } from "../../lib/api";
 
 const COLUMNS = 5;
@@ -51,11 +55,11 @@ function ModulePills({ codes }: { codes: string[] }) {
  * (§10.1). Status, user count, and module pills (§10.6).
  */
 export function TenantList() {
-  const [page, setPage] = useState(1);
+  const { page, pageSize, setPage, setPageSize, key } = usePagination();
   const [search, setSearch] = useState("");
 
-  const { state, reload } = useAsync(`tenants:${page}:${search}`, () =>
-    listTenants({ page, q: search, sort: "name" }),
+  const { state, reload } = useAsync(`tenants:${key}:${search}`, () =>
+    listTenants({ page, pageSize, q: search, sort: "name" }),
   );
 
   const newTenant = (
@@ -69,19 +73,17 @@ export function TenantList() {
 
   return (
     <AppShell title="Workspaces" actions={newTenant}>
-      <label className="mb-4 block max-w-sm">
-        <span className="mb-1 block text-sm text-secondary">Search</span>
-        <input
-          type="search"
+      <FilterBar>
+        <SearchInput
+          label="Search workspaces"
           value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
+          onChange={(next) => {
+            setSearch(next);
             setPage(1); // or page 3 of a 1-page result set strands the user
           }}
           placeholder="Name or slug"
-          className="min-h-11 w-full rounded-md border border-hairline bg-surface px-3 text-sm"
         />
-      </label>
+      </FilterBar>
 
       {state.status === "error" ? (
         <ErrorNotice error={state.error} onRetry={reload} />
@@ -90,7 +92,7 @@ export function TenantList() {
           {/* Horizontal scroll rather than card transformation: this is a dense
               administrative grid read on a desktop, and the counts are compared
               across rows (§10.7.4). */}
-          <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+          <TableFrame>
             <table className="w-full min-w-[42rem] text-left text-sm">
               <TableHead
                 columns={[
@@ -117,10 +119,7 @@ export function TenantList() {
               {state.status === "ready" && state.data.data.length > 0 && (
                 <tbody>
                   {state.data.data.map((tenant) => (
-                    <tr
-                      key={tenant.id}
-                      className="border-t border-hairline hover:bg-raised"
-                    >
+                    <tr key={tenant.id} className={tableRow}>
                       <td className="px-3 py-3">
                         <Link
                           to={`/admin/tenants/${tenant.id}`}
@@ -154,7 +153,7 @@ export function TenantList() {
                 </tbody>
               )}
             </table>
-          </div>
+          </TableFrame>
 
           {state.status === "ready" && (
             <Pagination
@@ -163,6 +162,7 @@ export function TenantList() {
               totalItems={state.data.totalItems}
               totalPages={state.data.totalPages}
               onPage={setPage}
+              onPageSize={setPageSize}
             />
           )}
         </>

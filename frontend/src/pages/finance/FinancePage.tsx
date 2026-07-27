@@ -11,9 +11,11 @@ import {
   SkeletonRows,
   SourceFilterNotice,
   TableHead,
+  tableRow,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
+import { usePagination } from "../../hooks/usePagination";
 import { listAccounts, listJournalEntries } from "../../lib/api";
 import { formatDateTime, formatMoney } from "../../lib/format";
 
@@ -38,7 +40,7 @@ export function FinancePage() {
   const me = useMe();
   const timezone = me.tenant?.timezone ?? "UTC";
 
-  const [page, setPage] = useState(1);
+  const { page, pageSize, setPage, setPageSize, key } = usePagination();
   const [accountId, setAccountId] = useState("");
 
   // `?sourceId=` narrows the journal to the entry one document posted. It comes
@@ -54,10 +56,11 @@ export function FinancePage() {
   );
 
   const { state, reload } = useAsync(
-    `journal:${page}:${accountId}:${sourceId}`,
+    `journal:${key}:${accountId}:${sourceId}`,
     () =>
       listJournalEntries({
         page,
+        pageSize,
         accountId: accountId || undefined,
         sourceId: sourceId || undefined,
         sort: "-postedAt",
@@ -90,7 +93,7 @@ export function FinancePage() {
             [0, 1].map((n) => (
               <div
                 key={n}
-                className="h-11 w-48 animate-pulse rounded-md border border-hairline bg-raised"
+                className="h-11 w-48 animate-pulse rounded-md border border-hairline bg-subtle"
               />
             ))}
           {accounts.state.status === "ready" &&
@@ -105,10 +108,10 @@ export function FinancePage() {
                     setAccountId(active ? "" : account.id);
                     setPage(1);
                   }}
-                  className={`min-h-11 rounded-md border px-3 text-left text-sm ${
+                  className={`min-h-11 rounded-lg border px-3 text-left text-sm transition-colors ${
                     active
-                      ? "border-accent bg-raised"
-                      : "border-hairline hover:bg-raised"
+                      ? "border-accent bg-subtle"
+                      : "border-hairline hover:bg-subtle"
                   }`}
                 >
                   <span className="tabular font-medium">{account.code}</span>{" "}
@@ -186,7 +189,7 @@ export function FinancePage() {
                     // of the row lifts.
                     <tr
                       key={entry.id}
-                      className="group border-t border-hairline align-top hover:bg-raised"
+                      className={`group align-top ${tableRow}`}
                     >
                       <td className={`px-3 py-3 ${frozenCell}`}>
                         <span className="tabular font-medium">
@@ -262,6 +265,7 @@ export function FinancePage() {
               totalItems={state.data.totalItems}
               totalPages={state.data.totalPages}
               onPage={setPage}
+              onPageSize={setPageSize}
             />
           )}
         </>

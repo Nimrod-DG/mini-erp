@@ -44,10 +44,12 @@ function withRequisitions(rows = ROWS) {
 /**
  * The screen, without the frame around it.
  *
- * Scoped deliberately: `AppShell`'s role badges are an `<ul>` of `<li>` in the
- * header, so an unscoped `getAllByRole("listitem")` counts a card list of two as
- * four — and the number of badges depends on how many modules the identity holds,
- * which would make the count of *cards* a function of the user's entitlements.
+ * Scoped deliberately. It was written because `AppShell`'s role badges were an
+ * `<ul>` of `<li>` in the header, so an unscoped `getAllByRole("listitem")`
+ * counted a card list of two as four — and the count of *cards* became a
+ * function of the user's entitlements. Those badges have since moved inside
+ * `UserMenu`, which is closed by default, so the collision is gone; the scoping
+ * stays, because a header that grows a list again should not break this test.
  */
 function main() {
   const region = document.querySelector("main");
@@ -60,6 +62,12 @@ describe("FE7 — the requisition list is cards below md and a table at lg", () 
     setViewportWidth(DESKTOP);
     withRequisitions();
     await renderApp("/procurement/requisitions", sari);
+
+    // Waiting for a *row* rather than for the table. `SkeletonRows` renders
+    // inside the same `<table>`, so `findByRole("table")` resolves while the
+    // list is still loading — and the row count below then counts five skeleton
+    // rows instead of two documents. Intermittent, and only ever on a slow run.
+    await screen.findByRole("link", { name: "PR-202607-0001" });
 
     const table = await screen.findByRole("table");
     // §10.7.4 asks for semantic markup specifically, because native table

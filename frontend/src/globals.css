@@ -24,6 +24,7 @@
   --ch-bg-canvas:      251 251 250;   /* #FBFBFA */
   --ch-bg-surface:     255 255 255;
   --ch-bg-raised:      255 255 255;
+  --ch-bg-subtle:      241 241 239;   /* #F1F1EF */
   --ch-text-primary:    23  25  28;   /* #17191C */
   --ch-text-secondary: 100 103 108;
   --ch-border:         229 229 227;
@@ -33,6 +34,16 @@
   --ch-danger:         185  28  28;
 }
 
+/* `subtle` is a *recessed* fill, and it is the one token that is not in
+   `design-system.md` §10.8.1. `raised` is white in light mode by design — an
+   elevated surface on white is white plus a shadow — which means every
+   `bg-raised`/`hover:bg-raised` in a table was invisible against the white
+   `surface` it sat on: no header band, no row hover, and skeleton bars that
+   could not be seen at all while a page loaded. Recessed is the shape a data
+   table actually wants for those three, so it gets its own value per theme
+   rather than borrowing one that means something else. In dark mode there is no
+   such collision and it is the same value as `raised`. */
+
 /* Accent, success, warning and danger take *different* values per theme, not
    one value reused. Saturated colours that read well on white vibrate on
    near-black; reusing them is the most common dark-mode mistake. */
@@ -40,6 +51,7 @@
   --ch-bg-canvas:       14  17  20;   /* #0E1114 */
   --ch-bg-surface:      24  27  31;   /* #181B1F */
   --ch-bg-raised:       32  36  41;
+  --ch-bg-subtle:       32  36  41;
   --ch-text-primary:   244 244 243;
   --ch-text-secondary: 163 163 160;
   --ch-border:          51  56  62;
@@ -57,6 +69,7 @@
   --color-canvas:    rgb(var(--ch-bg-canvas));
   --color-surface:   rgb(var(--ch-bg-surface));
   --color-raised:    rgb(var(--ch-bg-raised));
+  --color-subtle:    rgb(var(--ch-bg-subtle));
   --color-primary:   rgb(var(--ch-text-primary));
   --color-secondary: rgb(var(--ch-text-secondary));
   --color-hairline:  rgb(var(--ch-border));
@@ -64,6 +77,16 @@
   --color-success:   rgb(var(--ch-success));
   --color-warning:   rgb(var(--ch-warning));
   --color-danger:    rgb(var(--ch-danger));
+
+  /* A hairline drawn as a shadow rather than as a border.
+     `border-collapse: collapse` is on every table (Tailwind's preflight), and a
+     collapsed border belongs to the TABLE, not to the cell — so it does not
+     travel with a `position: sticky` cell, and the line under a sticky header
+     slides up and off while the header stays. A shadow is painted by the cell.
+     It is a theme token rather than `shadow-[inset_0_-1px_0_var(--color-hairline)]`
+     because Tailwind v4 has to know the colour at build time to fill
+     `--tw-shadow-color`, and silently emits nothing when handed a `var()`. */
+  --shadow-hairline: inset 0 -1px 0 rgb(var(--ch-border));
 
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", monospace;

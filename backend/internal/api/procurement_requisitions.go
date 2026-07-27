@@ -144,12 +144,26 @@ func (s *server) listRequisitions(c *fiber.Ctx) error {
 		return malformed(c, "status must be one of %s.",
 			strings.Join(requisitionStatuses, ", "))
 	}
+	supplierID, ok := optionalUUID(c, "supplierId")
+	if !ok {
+		return malformed(c, "supplierId is not a valid id.")
+	}
 
+	// `r.supplier_id` is NULLABLE here, unlike the purchase order's: a draft
+	// requisition need not name a supplier yet, and only approval makes one
+	// mandatory (§8.3). So filtering by supplier necessarily excludes the drafts
+	// that have not chosen one — which is the honest answer to "show me what we
+	// are buying from Acme", not a bug to paper over with a COALESCE.
 	where := `
 		WHERE (? = '' OR r.status = ?)
+		  AND (?::uuid IS NULL OR r.supplier_id = ?)
 		  AND (r.pr_number ILIKE ? OR COALESCE(s.name, '') ILIKE ?
 		       OR COALESCE(r.notes, '') ILIKE ?)`
-	args := []any{status, status, params.Like(), params.Like(), params.Like()}
+	args := []any{
+		status, status,
+		supplierID, supplierID,
+		params.Like(), params.Like(), params.Like(),
+	}
 
 	var total int64
 	if err := tx.Raw(`

@@ -89,7 +89,7 @@ export function ProductDetailPage() {
       {product.deletedAt && (
         <div
           role="status"
-          className="mb-6 rounded-lg border border-hairline bg-raised p-4 text-sm"
+          className="mb-6 rounded-xl border border-hairline bg-subtle p-4 text-sm"
         >
           <p>
             This product is deleted. It no longer appears in lists or pickers,

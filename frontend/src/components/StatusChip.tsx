@@ -41,52 +41,12 @@ export function StatusChip({ status }: { status: DocumentStatus }) {
   );
 }
 
-/**
- * The filter chips §10.3 asks for, driven by the server's `?status=` parameter
- * rather than by filtering a page in the browser.
- *
- * That distinction matters: filtering the current page would silently show "3
- * drafts" when the tenant has forty, because only 25 rows were fetched. The
- * count in the pagination line and the rows in the table have to be answers to
- * the same question.
- */
-export function StatusFilter<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T | "";
-  options: readonly T[];
-  onChange: (next: T | "") => void;
-}) {
-  const chip = (active: boolean) =>
-    `min-h-11 rounded-full border px-3 text-sm ${
-      active
-        ? "border-accent bg-accent/10 text-accent"
-        : "border-hairline text-secondary hover:text-primary"
-    }`;
-
-  return (
-    <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
-      <button
-        type="button"
-        aria-pressed={value === ""}
-        onClick={() => onChange("")}
-        className={chip(value === "")}
-      >
-        All
-      </button>
-      {options.map((option) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={value === option}
-          onClick={() => onChange(option)}
-          className={chip(value === option)}
-        >
-          {statusLabel(option as DocumentStatus)}
-        </button>
-      ))}
-    </div>
-  );
-}
+// `StatusFilter` — the row of chips §10.3 originally asked for — was removed
+// when the filter row became a search box and dropdowns on one line. Five chips
+// plus a search box could not share a line, and the chips were the half that
+// scaled worst: the requisition list has five statuses, and a sixth would have
+// wrapped. The rule the chips existed to enforce is unchanged and now lives in
+// the dropdown's `onChange`: the status is a *server* parameter, never a
+// `.filter()` over the fetched page. Filtering the page would report "3 drafts"
+// for a tenant with forty, because only one page arrived — the count in the
+// pagination line and the rows in the table have to answer the same question.

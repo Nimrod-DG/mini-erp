@@ -2,15 +2,19 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { AppShell } from "../../components/AppShell";
+import { FilterBar, SearchInput } from "../../components/Filters";
 import {
   EmptyState,
   ErrorNotice,
   Pagination,
   SkeletonRows,
+  TableFrame,
   TableHead,
+  tableRow,
 } from "../../components/ListStates";
 import { useAsync } from "../../hooks/useAsync";
 import { useMe } from "../../hooks/useAuth";
+import { usePagination } from "../../hooks/usePagination";
 import { listProducts, type Product } from "../../lib/api";
 import { formatMoney, formatQty } from "../../lib/format";
 import { holds } from "../../lib/levels";
@@ -28,7 +32,7 @@ const COLUMNS = 5;
  */
 export function ProductList() {
   const me = useMe();
-  const [page, setPage] = useState(1);
+  const { page, pageSize, setPage, setPageSize, key } = usePagination();
   const [search, setSearch] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
 
@@ -37,10 +41,11 @@ export function ProductList() {
   const canManage = holds(me.moduleRoles, "inventory", "admin");
 
   const { state, reload } = useAsync(
-    `products:${page}:${search}:${showDeleted}`,
+    `products:${key}:${search}:${showDeleted}`,
     () =>
       listProducts({
         page,
+        pageSize,
         q: search,
         sort: "sku",
         includeDeleted: canManage && showDeleted,
@@ -58,23 +63,19 @@ export function ProductList() {
 
   return (
     <AppShell title="Products" actions={newProduct}>
-      <div className="mb-4 flex flex-wrap items-end gap-4">
-        <label className="block max-w-sm grow">
-          <span className="mb-1 block text-sm text-secondary">Search</span>
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder="SKU or name"
-            className="min-h-11 w-full rounded-md border border-hairline bg-surface px-3 text-sm"
-          />
-        </label>
+      <FilterBar>
+        <SearchInput
+          label="Search products"
+          value={search}
+          onChange={(next) => {
+            setSearch(next);
+            setPage(1);
+          }}
+          placeholder="SKU or name"
+        />
 
         {canManage && (
-          <label className="flex min-h-11 items-center gap-2 text-sm">
+          <label className="flex min-h-11 shrink-0 items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={showDeleted}
@@ -87,13 +88,13 @@ export function ProductList() {
             Show deleted
           </label>
         )}
-      </div>
+      </FilterBar>
 
       {state.status === "error" ? (
         <ErrorNotice error={state.error} onRetry={reload} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-hairline bg-surface">
+          <TableFrame>
             <table className="w-full min-w-[42rem] text-left text-sm">
               <TableHead
                 columns={[
@@ -125,7 +126,7 @@ export function ProductList() {
                 </tbody>
               )}
             </table>
-          </div>
+          </TableFrame>
 
           {state.status === "ready" && (
             <Pagination
@@ -134,6 +135,7 @@ export function ProductList() {
               totalItems={state.data.totalItems}
               totalPages={state.data.totalPages}
               onPage={setPage}
+              onPageSize={setPageSize}
             />
           )}
         </>
@@ -150,7 +152,7 @@ export function ProductList() {
  */
 function ProductRow({ product }: { product: Product }) {
   return (
-    <tr className="border-t border-hairline hover:bg-raised">
+    <tr className={tableRow}>
       <td className="px-3 py-3">
         <Link
           to={`/inventory/products/${product.id}`}

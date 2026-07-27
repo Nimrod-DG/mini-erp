@@ -9,15 +9,16 @@
  */
 
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { SkeletonRows } from "../components/ListStates";
-import { StatusChip, StatusFilter } from "../components/StatusChip";
+import { StatusChip } from "../components/StatusChip";
 import type { DocumentStatus } from "../lib/format";
 import { statusLabel } from "../lib/format";
 import { journalEntry, ledgerEntry, page, requisition, rina, warehouse } from "./fixtures";
 import { paddingTokens, TEXT_SM_LINE_PX, declaredHeightPx } from "./layout";
-import { renderApp, renderWithProviders } from "./render";
+import { renderApp } from "./render";
 import { apiUrl, http, HttpResponse, server } from "./server";
 
 /** Every status in the naming contract: five for a requisition, four for an
@@ -82,22 +83,26 @@ describe("FE12 — every status badge carries text, not only colour", () => {
     }
   });
 
-  it("gives the filter chips a pressed state rather than a colour alone", () => {
-    // The same rule one level up. Which filter is active is announced by
-    // `aria-pressed`, so it is not read off the accent tint.
-    renderWithProviders(
-      <StatusFilter value="submitted" options={["draft", "submitted"]} onChange={() => {}} />,
+  it("names the chosen status in the filter rather than tinting it", async () => {
+    // The same rule one level up, and it survived the chips. The filter is a
+    // dropdown now, so which status is active is carried by the *word in the
+    // trigger* and by `aria-selected` on the option — not by an accent tint on
+    // one of six pills. FE31 covers the control itself; this asserts the FE12
+    // half of it, that the state is legible without colour.
+    server.use(
+      http.get(apiUrl("/api/procurement/requisitions"), () =>
+        HttpResponse.json(page([])),
+      ),
     );
+    await renderApp("/procurement/requisitions", rina);
 
-    expect(screen.getByRole("button", { name: "Submitted" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
-    expect(screen.getByRole("group", { name: "Filter by status" })).toBeInTheDocument();
+    const filter = await screen.findByRole("combobox", { name: "Status" });
+    expect(filter).toHaveTextContent("All statuses");
+
+    await userEvent.click(filter);
+    await userEvent.click(screen.getByRole("option", { name: "Submitted" }));
+
+    expect(filter).toHaveTextContent("Submitted");
   });
 
   it("keeps the word in the card view as well as the table", async () => {
@@ -210,6 +215,22 @@ describe("FE26 — numeric columns are right-aligned and tabular", () => {
    * to be both right-aligned and tabular. Reading it this way means a new numeric
    * column is covered the day it is added, without this test naming any column.
    */
+  /**
+   * The table, once its data has actually arrived.
+   *
+   * `findByRole("table")` on its own resolves immediately, because `SkeletonRows`
+   * renders *inside* that same `<table>` — and a skeleton cell is a plain
+   * `px-3 py-3` with no `text-right` and no `tabular`, so every assertion below
+   * fails against it. That made these four an intermittent failure: green when
+   * MSW answered inside the first render, red when it did not. Waiting for the
+   * pulse to go is waiting for the real cells.
+   */
+  async function findLoadedTable(): Promise<HTMLElement> {
+    const table = await screen.findByRole("table");
+    await waitFor(() => expect(table.querySelector(".animate-pulse")).toBeNull());
+    return table;
+  }
+
   function assertNumericColumns(table: HTMLElement) {
     const headings = within(table).getAllByRole("columnheader");
     const numeric = headings
@@ -254,7 +275,7 @@ describe("FE26 — numeric columns are right-aligned and tabular", () => {
     );
     await renderApp("/procurement/requisitions", rina);
 
-    assertNumericColumns(await screen.findByRole("table"));
+    assertNumericColumns(await findLoadedTable());
   });
 
   it("holds on the stock grid, including the frozen column", async () => {
@@ -279,7 +300,7 @@ describe("FE26 — numeric columns are right-aligned and tabular", () => {
     );
     await renderApp("/inventory/stock", rina);
 
-    assertNumericColumns(await screen.findByRole("table"));
+    assertNumericColumns(await findLoadedTable());
   });
 
   it("holds on the stock ledger, where the sign is the content", async () => {
@@ -292,7 +313,7 @@ describe("FE26 — numeric columns are right-aligned and tabular", () => {
     );
     await renderApp("/inventory/ledger", rina);
 
-    assertNumericColumns(await screen.findByRole("table"));
+    assertNumericColumns(await findLoadedTable());
   });
 
   it("holds on the journal, where debits and credits have to line up", async () => {
@@ -304,6 +325,10 @@ describe("FE26 — numeric columns are right-aligned and tabular", () => {
       ),
     );
     await renderApp("/finance", rina);
+
+    // The journal's own table, loaded — same reason as `findLoadedTable`. The
+    // page renders a nested table of lines per entry, hence the sweep.
+    await findLoadedTable();
 
     const tables = await screen.findAllByRole("table");
     for (const table of tables) {
