@@ -2472,3 +2472,44 @@ Tests green: unchanged from the entry above — 376 backend, 102 frontend, 11
 
 Next: nothing outstanding for Phase 10. Phase 11 (the audit log) is the next
 build work, and remains post-MVP.
+
+---
+
+## Next session — 2026-07-27
+
+**The next piece of work is Phase 9.5, and the plan is written:
+[`phases/phase-9.5-vercel.md`](phases/phase-9.5-vercel.md).** It is
+self-contained; open it and follow it, and load only the three files it names.
+
+**What it is.** Phase 9 finished the deployment work and stopped at a payment
+wall — Cloud Run and Render both want a verified card. Vercel's Hobby tier does
+not, so the phase ports the API onto it. It is a hosting workaround, not an
+architectural improvement, and everything in it is additive: the Cloud Run and
+Render paths must still work afterwards.
+
+**Start with the spike in step 2, not with code.** Three unknowns decide whether
+the rest is worth doing — whether Hobby still deploys without a card, whether a
+catch-all preserves the original request path, and what the current function
+duration limit is. Thirty minutes in a throwaway repository answers all three. If
+the first answer is "no", record it here and stop; that closes the phase rather
+than failing it.
+
+**The four things that will actually cost time**, in order: pgx's prepared
+statements against Neon's PgBouncer pooler (fails only under concurrency, and
+never locally), connection limits from a `SetMaxOpenConns(10)` that serverless
+multiplies sideways, the routing spike, and the Firebase key arriving as JSON in
+an env var rather than as a file path.
+
+**Two things already work in our favour.** The pools are lazy behind `sync.Once`,
+so a cold start opens one pool and not two. And tenant scope is `SET LOCAL`
+inside an explicit transaction (I2), which is precisely the unit transaction-mode
+pooling preserves — so the isolation model should survive PgBouncer untouched.
+Verify that rather than assuming it; step 7 has the two-tenant test. If it holds,
+it is worth writing up.
+
+**The trap to avoid** is putting a `go.mod` at the repository root to satisfy
+Vercel's `api/` convention. That breaks I13. Set the Vercel project's root
+directory to `backend` instead — step 3.
+
+Nothing else is outstanding. Phase 10 is closed, both repositories are pushed,
+and Phase 11 (the audit log) remains post-MVP.

@@ -29,6 +29,7 @@ original except for the sixteen corrections listed in [`AUDIT.md`](AUDIT.md).
 | 7.5 | **[The acceptance walk](phases/phase-7.5-acceptance-walk.md)** — the MVP gate. How to walk [`acceptance-test.md`](acceptance-test.md) in a browser, and what is already verified without one | ✅ | 1.5h |
 | 8 | [Frontend tests, CI, polish](phases/phase-8-frontend-tests.md) | ➖ | 4h |
 | 9 | [Deployment](phases/phase-9-deployment.md) | ➖ | 4h |
+| 9.5 | **[The API on Vercel](phases/phase-9.5-vercel.md)** — Phase 9 stopped at a card-verification wall; Vercel's Hobby tier has none. A hosting workaround, entirely additive. **Next up** | ➖ | 3–4h |
 | 10 | [Documentation](phases/phase-10-documentation.md) | ➖ | 2h |
 | 11 | [Audit log](phases/phase-11-audit-log.md) | ➖ | 3h |
 
