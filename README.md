@@ -117,9 +117,13 @@ The chain, in order:
    Never from a token claim: a claim is a snapshot that keeps asserting what was
    true when it was minted, long after an admin revoked the access.
 3. **The handler runs inside a transaction that has issued
-   `SET LOCAL app.current_tenant = <uuid>`.** `SET LOCAL`, never plain `SET` — a
-   session-scoped setting outlives the transaction and would hand the tenant
-   context to whichever request next borrowed that pooled connection.
+   `SELECT set_config('app.current_tenant', $1, true)`.** That third argument is
+   `is_local` — transaction-scoped, exactly what `SET LOCAL` means, and never a
+   plain `SET`: a session-scoped setting outlives the transaction and would hand
+   the tenant context to whichever request next borrowed that pooled connection.
+   The function form rather than `SET LOCAL` because `SET` cannot take a bind
+   parameter, and concatenating the tenant id into that particular statement is
+   the last place in this system you want string interpolation.
 4. **Fourteen tables have RLS `ENABLED` *and* `FORCED`,** with a policy comparing
    `tenant_id` to that setting. `FORCE` is the part people miss: without it the
    table's owner bypasses the policy entirely, which silently defeats the whole
@@ -141,10 +145,13 @@ CREATE POLICY tenant_isolation ON %I
   WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
 ```
 
-`WITH CHECK` is not optional — without it a tenant can *write* rows tagged with
-another tenant's id. The `NULLIF` maps the empty string back to `NULL` so a
-request with no tenant context returns zero rows rather than raising
-`invalid input syntax for type uuid`.
+Both clauses are written out deliberately. PostgreSQL falls back to the `USING`
+expression when `WITH CHECK` is omitted, so *this* policy would still refuse a
+write tagged with another tenant's id — but the fallback makes the omission
+survivable, not correct. Split the policy per-command, or let the read rule and
+the write rule ever differ, and the silence becomes a bug. The `NULLIF` maps the
+empty string back to `NULL` so a request with no tenant context returns zero rows
+rather than raising `invalid input syntax for type uuid`.
 
 Full detail: [`docs/reference/tenancy-and-rls.md`](docs/reference/tenancy-and-rls.md).
 
@@ -206,21 +213,27 @@ single transaction.
 
 ```mermaid
 flowchart LR
-    S["POST /goods-receipts<br/>+ Idempotency-Key"] --> T{{"BEGIN<br/>SET LOCAL app.current_tenant"}}
+    S["POST /goods-receipts<br/>+ Idempotency-Key"] --> T{{"BEGIN<br/>set_config app.current_tenant"}}
     T --> R1["1 · goods_receipts<br/>header, under a SAVEPOINT"]
-    R1 --> R2["2 · stock_ledger<br/>one row per line"]
-    R2 --> R3["3 · journal_entries<br/>balanced Dr and Cr"]
-    R3 --> C{{"COMMIT<br/>all three, or none"}}
+    R1 --> R2["2 · goods_receipt_lines<br/>product from the order line"]
+    R2 --> R3["3 · purchase_orders<br/>status re-derived"]
+    R3 --> R4["4 · stock_ledger<br/>one row per line"]
+    R4 --> R5["5 · journal_entries<br/>balanced Dr and Cr"]
+    R5 --> C{{"COMMIT<br/>all five, or none"}}
 ```
 
-The order is load-bearing — the journal entry is valued from what the ledger rows
-recorded — so it has a test of its own, because a refactor that reordered it
-would still pass every other test in the suite.
+Steps 4 and 5 are siblings, not a chain. Both are derived in SQL from the receipt
+lines written in step 2 — never from the request body, and never from each other —
+so neither can value or count something the receipt does not say arrived. What is
+load-bearing is the transaction, not the order. Test D8 soft-deletes the account
+the journal must credit, so step 5 fails on the real code path with no test hook
+to reach through — then asserts that the receipt, its lines, the ledger rows, the
+order's status change, and even the allocated `GR` number are all gone.
 
 **Retries are safe.** The form generates an idempotency key when the *screen
 mounts*, not when the button is pressed, so a resubmit carries the same key and
 replays the first result instead of receiving the goods twice. The key is checked
-three times — before the work, again after the order lines are locked (a retry
+three times — before the work, again after the purchase order is locked (a retry
 already in flight can commit while this request waits for that lock), and finally
 by a unique constraint at the insert. That last one sits under a `SAVEPOINT`,
 because in PostgreSQL a failed statement otherwise takes the whole transaction
