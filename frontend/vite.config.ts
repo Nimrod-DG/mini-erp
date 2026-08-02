@@ -8,7 +8,12 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: { port: 5173 },
+  // `strictPort`, because the default is worse than a crash: Vite moves to 5174
+  // *without failing* when 5173 is taken, and 5173 is the exact origin named by
+  // CORS_ORIGINS in backend/.env. Every API call is then refused by CORS, which
+  // surfaces as a signed-in app whose every screen is empty -- a symptom that
+  // appears in no log of its own. Refusing to start says which port and why.
+  server: { port: 5173, strictPort: true },
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],

@@ -98,14 +98,30 @@ effective-roles bug below, and four touch targets under 44px. That is the
 calibration for what the browser walk should expect.
 
 **Two things the API pass established about the *local database*, not the code**,
-which will otherwise read as failures:
+which will otherwise read as failures. **Both were re-checked on 2026-08-02 and
+one of them has changed — see the correction under each.**
 
 - `HND-GLOVE` and `PKG-BOX-L` sit on **open** orders, so deleting them is refused
   with `in_use` — correct (G4), and step 18 needs a product on a closed order:
-  `OFF-PAPER` or `HND-PALLET`.
-- Nusantara has **three** tenant admins, because two scratch accounts from Phases
-  2–3 are still here. `last_admin` therefore does not fire for Rina. Confirmed
-  correct by temporarily demoting the other two.
+  ~~`OFF-PAPER` or `HND-PALLET`~~.
+
+  **Corrected 2026-08-02: `OFF-PAPER` is no longer safe for step 18.** It is on
+  `PO-202607-0001`, which is `open`, so it is now refused with `in_use` too. The
+  rule is in `deleteProduct` (`inventory_master.go`): refused when the product is
+  on a line of a PO whose status is `open` **or** `partially_received` — not
+  "on an open order" loosely. Nusantara products on no order at all, and so
+  always safe for step 18: **`HND-PALLET`, `HND-TROLLEY`, `OFF-LABEL`,
+  `OFF-TONER`, `PKG-BOX-S`, `PKG-TAPE`**. Note this set is *state-dependent*:
+  receiving `PO-202607-0001` to completion frees `OFF-PAPER` and `PKG-BOX-L`
+  again, so re-derive it rather than trusting this list after a demo.
+
+- ~~Nusantara has **three** tenant admins, because two scratch accounts from
+  Phases 2–3 are still here. `last_admin` therefore does not fire for Rina.~~
+
+  **Corrected 2026-08-02: no longer true.** The scratch accounts are gone (see
+  the seeded-demo section below), so Nusantara has **exactly one** tenant admin,
+  Rina. `last_admin` **does** now fire for her, and the acceptance step that needs
+  it works against the local database without any preparation.
 
 ### The browser walkthrough was deferred to this phase, and is what remains
 
@@ -165,19 +181,36 @@ rows spread across the preceding 60 days, 13 requisitions (2 draft, 3 submitted,
 goods receipts that each wrote stock ledger rows **and** a balanced journal entry
 in the same transaction.
 
-**Leftover scratch rows from Phases 2–3 are still in the local database and were
-deliberately not deleted:** a product `SKU-001 Widget`, a warehouse `WH-1`, and
-three accounts (`dgjy2019@gmail.com`, `phase2-check@example.test`,
-`superadmin@example.test`). They are harmless — none of the acceptance steps
-touch them — and `dgjy2019@gmail.com` is the developer's own Firebase account and
-a working Nusantara tenant admin, which is useful. To get a pristine demo instead:
+**The local database holds a ninth goods receipt the seed did not write.**
+`GR-202607-0005`, posted by `rina@nusantara.test` against Nusantara's
+`PO-202606-0001` on 2026-07-27, twenty minutes after that day's seed run — a
+by-hand receipt left over from the browser walk, identifiable by its UUID
+idempotency key where every seeded receipt carries `seed-gr-<tenant>-<n>`.
+It is harmless and no acceptance step touches it, but it is why a count of
+`goods_receipts` returns **9** rather than the 8 this section implies, and
+`make seed` will not remove it. The volume-drop rebuild below does.
 
-```sql
-DELETE FROM stock_ledger WHERE product_id IN (SELECT id FROM products WHERE sku = 'SKU-001');
-DELETE FROM products   WHERE sku  = 'SKU-001';
-DELETE FROM warehouses WHERE code = 'WH-1';
-DELETE FROM users      WHERE email IN ('phase2-check@example.test','superadmin@example.test');
+**The leftover scratch rows from Phases 2–3 are gone. Verified 2026-08-02** — the
+local database now holds exactly the eight seeded accounts, four warehouses and
+twenty products, with no `SKU-001 Widget`, no warehouse `WH-1`, and none of the
+three scratch accounts (`dgjy2019@gmail.com`, `phase2-check@example.test`,
+`superadmin@example.test`). Two consequences, both good: `/settings/users` shows
+only seeded people and is safe to demo, and `last_admin` fires for Rina (above).
+
+The cleanup SQL that used to live here has been removed rather than kept for
+reference — it named rows that no longer exist, and re-running it would have been
+a no-op that still read as a required step. To get a pristine database now, drop
+the volume and rebuild:
+
+```bash
+docker compose down -v && make up && make migrate && make seed
 ```
+
+Roughly two minutes, and **the demo URLs survive it**: every seeded row uses a
+UUIDv5 derived from what it is (`cmd/seed/ids.go`), so a rebuild writes the same
+ids. This is the reliable reset, because the targeted alternative has a trap —
+`purchase_orders` carries the `po_terminal_immutable` trigger, so an
+`UPDATE … SET status = 'open'` on a received order is refused outright.
 
 **The seed adopts rather than collides.** `tenants` upserts on `slug` and `users`
 on `email`, returning the row's real id — which is why the seed ran against a
@@ -3103,3 +3136,50 @@ directory to `backend` instead — step 3.
 
 Nothing else is outstanding. Phase 10 is closed, both repositories are pushed,
 and Phase 11 (the audit log) remains post-MVP.
+
+---
+
+## Local-run verification — 2026-08-02
+
+**Not a phase.** A cold-start rehearsal of the local stack ahead of a live demo,
+plus the corrections it turned up in this file. No application code was changed.
+
+Done: the whole local sequence was run from a stopped container and verified end
+to end — `make up` (healthy, 5.5s), `make migrate` (schema current, roles
+re-applied), `make seed` (3s, so the Firebase service account key is live, not
+merely present), `make verify-db` (**11/11**), `cmd/api` on `:8080`, Vite on
+`:5173`. `/api/health` → 200; `/api/me` without a token → 401; the CORS preflight
+answers `Access-Control-Allow-Origin: http://localhost:5173`. Signed in through
+the browser and the dashboard rendered live data. **Total command time is about
+15 seconds** with Docker already up and the Go build cache warm.
+
+Tests green: none run — the Go and frontend suites were not part of this session.
+The only assertions made were `dbverify`'s eleven and the HTTP checks above.
+
+Deviations from spec: none.
+
+TODO(post-mvp) markers added: none.
+
+**Three corrections applied to this file**, all found by querying the live
+database rather than by reading:
+
+1. `OFF-PAPER` is no longer a valid product for acceptance step 18 — it sits on
+   the open `PO-202607-0001` and is now refused with `in_use`. The safe set is
+   re-derived and listed, with a warning that it is state-dependent.
+2. Nusantara has **one** tenant admin, not three, so `last_admin` fires for Rina.
+   The old note said the opposite.
+3. The Phase 2–3 scratch rows (`SKU-001`, `WH-1`, three accounts) are **gone**.
+   The cleanup SQL that named them was removed and replaced with the
+   volume-drop rebuild, which is the only reset that works — a targeted
+   `UPDATE … SET status = 'open'` is refused by `po_terminal_immutable`.
+
+**One thing worth knowing before the next demo or walkthrough:** a goods receipt
+posted by a user holding `finance: none` renders the §10.3 confirmation panel's
+finance line, but following it hits `RequireModule` in the browser, which
+`Navigate`s to `/` **silently** — no refusal is shown. Budi is such a user. Post
+receipts as Rina when the panel's links are the point. The server-side refusal is
+the honest evidence and is unaffected: `GET /api/finance/journal-entries` as
+`agus@bahari.test` returns `403 module_not_enabled`, confirmed against the
+running API with a real Firebase token.
+
+Next: unchanged — Phase 9.5, as described in the section above.
